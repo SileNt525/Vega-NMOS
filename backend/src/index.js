@@ -1,4 +1,5 @@
 const express = require('express');
+const { v4: uuidv4 } = require('uuid');
 const http = require('http');
 const WebSocket = require('ws');
 
@@ -7,6 +8,100 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
 const PORT = process.env.PORT || 3000;
+
+// NMOS Registration Configuration
+const NMOS_REGISTRY_REGISTRATION_URL = process.env.NMOS_REGISTRY_REGISTRATION_URL || 'http://10.11.1.14:8010/x-nmos/registration/v1.3'; // Default Registration API URL
+const NMOS_HEARTBEAT_INTERVAL_MS = parseInt(process.env.NMOS_HEARTBEAT_INTERVAL_MS || '5000', 10); // Default heartbeat interval: 5 seconds
+
+// Define NMOS Node, Device, etc. resources for this backend instance
+const NODE_ID = uuidv4();
+const DEVICE_ID = uuidv4();
+// Define Sender/Receiver IDs if needed later for virtual resources
+// const SENDER_ID = uuidv4();
+// const RECEIVER_ID = uuidv4();
+
+const nodeResource = {
+  id: NODE_ID,
+  version: Date.now().toString(), // Use timestamp for versioning
+  label: 'Vega-NMOS Panel Backend Node',
+  description: 'NMOS Node representing the Vega-NMOS Control Panel backend service.',
+  tags: {},
+  hostname: require('os').hostname(),
+  api: {
+    versions: [
+      {
+        version: '1.3.1',
+        endpoints: [
+          { format: 'internal', path: '/', protocol: 'http' } // Indicate internal API
+        ]
+      }
+    ],
+    ch_hostname: require('os').hostname(),
+    ch_port: PORT,
+    ch_protocol: 'http'
+  },
+  href: `http://${require('os').hostname()}:${PORT}/`, // Base URL for this node's API
+  services: [], // Add service discovery endpoints if implemented (e.g., DNS-SD)
+  // Add attached_network_device if applicable
+};
+
+const deviceResource = {
+  id: DEVICE_ID,
+  version: Date.now().toString(),
+  label: 'Vega-NMOS Panel Device',
+  description: 'Virtual device representing the control panel functionality.',
+  tags: {},
+  node_id: NODE_ID,
+  type: 'urn:nmos:device:generic',
+  senders: [], // Add sender IDs if virtual senders are created
+  receivers: [], // Add receiver IDs if virtual receivers are created
+  controls: [
+    // Add control endpoints if this device exposes any (e.g., IS-05 Connection API if implemented here)
+  ]
+};
+
+// Function to register resources with the NMOS Registry
+async function registerWithRegistry() {
+  console.log(`Attempting to register Node ${NODE_ID} and Device ${DEVICE_ID} with Registry at ${NMOS_REGISTRY_REGISTRATION_URL}`);
+  const registrationUrl = `${NMOS_REGISTRY_REGISTRATION_URL}/resource`;
+
+  try {
+    // Register Node
+    let response = await axios.post(registrationUrl, { type: 'node', data: nodeResource });
+    console.log(`Node registration successful: ${response.status}`);
+
+    // Register Device
+    response = await axios.post(registrationUrl, { type: 'device', data: deviceResource });
+    console.log(`Device registration successful: ${response.status}`);
+
+    // TODO: Register Sender/Receiver resources if virtual ones are defined
+
+    console.log('Initial NMOS registration complete.');
+
+  } catch (error) {
+    console.error(`Error during initial NMOS registration:`, error.message);
+    if (error.response) {
+      console.error('Error details:', error.response.status, error.response.data);
+    }
+    // Implement retry logic if necessary
+  }
+}
+
+// Function to send heartbeat to the NMOS Registry
+async function sendHeartbeat() {
+  const heartbeatUrl = `${NMOS_REGISTRY_REGISTRATION_URL}/health/${NODE_ID}`;
+  try {
+    const response = await axios.post(heartbeatUrl, {});
+    // console.log(`Heartbeat successful for Node ${NODE_ID}: ${response.status}`); // Log less frequently for heartbeats
+  } catch (error) {
+    console.error(`Error sending heartbeat for Node ${NODE_ID}:`, error.message);
+    if (error.response) {
+      console.error('Error details:', error.response.status, error.response.data);
+    }
+    // If heartbeat fails, the Registry will eventually unregister the Node.
+    // Consider re-attempting registration if heartbeats consistently fail.
+  }
+}
 
 // Middleware to parse JSON request bodies
 app.use(express.json());
@@ -34,7 +129,13 @@ wss.on('connection', (ws) => {
 
 server.listen(PORT, () => {
   console.log(`Backend server is listening on port ${PORT}`);
-  console.log(`WebSocket server is running on ws://localhost:${PORT}`)
+  console.log(`WebSocket server is running on ws://localhost:${PORT}`);
+
+  // Perform initial registration with NMOS Registry
+  registerWithRegistry();
+
+  // Start periodic heartbeat
+  setInterval(sendHeartbeat, NMOS_HEARTBEAT_INTERVAL_MS);
 });
 
 const axios = require('axios');
