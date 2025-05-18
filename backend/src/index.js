@@ -94,6 +94,7 @@ performIS04Discovery(currentRegistryUrl);
 
 // API endpoint for frontend to get discovered resources
 app.post('/api/is04/discover', async (req, res) => {
+  try {
   const { registryUrl } = req.body;
   if (!registryUrl) {
     return res.status(400).json({ message: 'registryUrl is required in the request body.' });
@@ -107,6 +108,10 @@ app.post('/api/is04/discover', async (req, res) => {
   currentRegistryUrl = registryUrl; // Update current registry URL for subsequent calls if needed
   await performIS04Discovery(registryUrl);
   res.json({ message: `IS-04 discovery initiated for ${registryUrl}.`, data: discoveredResources });
+  } catch (error) {
+    console.error('Unhandled error in /api/is04/discover:', error);
+    res.status(500).json({ message: 'An internal server error occurred during discovery.', error: error.message });
+  }
 });
 
 // This endpoint now just returns the last discovered resources.
