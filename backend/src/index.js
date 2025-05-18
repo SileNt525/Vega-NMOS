@@ -37,7 +37,7 @@ server.listen(PORT, () => {
 const axios = require('axios');
 
 // --- IS-04 Discovery --- 
-const NMOS_REGISTRY_URL = process.env.NMOS_REGISTRY_URL || 'http://localhost:8870/x-nmos/query/v1.3'; // Default, can be overridden by env var
+let currentRegistryUrl = process.env.NMOS_REGISTRY_URL || 'http://localhost:8870/x-nmos/query/v1.3'; // Default, can be overridden by env var or API
 let discoveredResources = {
   nodes: [],
   devices: [],
@@ -47,13 +47,15 @@ let discoveredResources = {
   receivers: [],
 };
 
-async function fetchFromRegistry(resourceType) {
+async function fetchFromRegistry(resourceType, registryUrlToUse) {
+  const fullUrl = `${registryUrlToUse}/${resourceType}`.replace(/\/?$/, `/${resourceType}`); // Ensure correct slashes
+  console.log(`Attempting to fetch ${resourceType} from ${fullUrl}`);
   try {
-    const response = await axios.get(`${NMOS_REGISTRY_URL}/${resourceType}`);
-    console.log(`Successfully fetched ${resourceType} from ${NMOS_REGISTRY_URL}`);
+    const response = await axios.get(fullUrl);
+    console.log(`Successfully fetched ${resourceType} from ${fullUrl}`);
     return response.data;
   } catch (error) {
-    console.error(`Error fetching ${resourceType} from ${NMOS_REGISTRY_URL}:`, error.message);
+    console.error(`Error fetching ${resourceType} from ${fullUrl}:`, error.message);
     if (error.response) {
       console.error('Error details:', error.response.status, error.response.data);
     }
@@ -61,29 +63,62 @@ async function fetchFromRegistry(resourceType) {
   }
 }
 
-async function startIS04Discovery() {
-  console.log(`Initializing IS-04 Discovery against Registry: ${NMOS_REGISTRY_URL}`);
+async function performIS04Discovery(registryUrl) {
+  console.log(`Performing IS-04 Discovery against Registry: ${registryUrl}`);
   
-  discoveredResources.nodes = await fetchFromRegistry('nodes');
-  discoveredResources.devices = await fetchFromRegistry('devices');
-  discoveredResources.sources = await fetchFromRegistry('sources');
-  discoveredResources.flows = await fetchFromRegistry('flows');
-  discoveredResources.senders = await fetchFromRegistry('senders');
-  discoveredResources.receivers = await fetchFromRegistry('receivers');
+  // Clear previous results before new discovery
+  discoveredResources = {
+    nodes: [],
+    devices: [],
+    sources: [],
+    flows: [],
+    senders: [],
+    receivers: [],
+  };
 
-  console.log('IS-04 Initial discovery complete.');
-  // TODO: Implement WebSocket subscription for real-time updates
+  discoveredResources.nodes = await fetchFromRegistry('nodes', registryUrl);
+  discoveredResources.devices = await fetchFromRegistry('devices', registryUrl);
+  discoveredResources.sources = await fetchFromRegistry('sources', registryUrl);
+  discoveredResources.flows = await fetchFromRegistry('flows', registryUrl);
+  discoveredResources.senders = await fetchFromRegistry('senders', registryUrl);
+  discoveredResources.receivers = await fetchFromRegistry('receivers', registryUrl);
+
+  console.log('IS-04 Discovery complete for:', registryUrl);
+  // TODO: Implement WebSocket subscription for real-time updates (would also need to handle registryUrl changes)
 }
 
+// Initial discovery on startup using the default/env URL
+performIS04Discovery(currentRegistryUrl);
+
 // API endpoint for frontend to get discovered resources
+app.post('/api/is04/discover', async (req, res) => {
+  const { registryUrl } = req.body;
+  if (!registryUrl) {
+    return res.status(400).json({ message: 'registryUrl is required in the request body.' });
+  }
+  // Basic URL validation (can be more sophisticated)
+  if (!registryUrl.startsWith('http://') && !registryUrl.startsWith('https://')) {
+    return res.status(400).json({ message: 'Invalid registryUrl format. Must start with http:// or https://' });
+  }
+
+  console.log(`API call to discover resources from: ${registryUrl}`);
+  currentRegistryUrl = registryUrl; // Update current registry URL for subsequent calls if needed
+  await performIS04Discovery(registryUrl);
+  res.json({ message: `IS-04 discovery initiated for ${registryUrl}.`, data: discoveredResources });
+});
+
+// This endpoint now just returns the last discovered resources.
+// For a fresh fetch or change of registry, use POST /api/is04/discover
 app.get('/api/is04/resources', (req, res) => {
   res.json(discoveredResources);
 });
 
+// The refresh endpoint might be redundant now, or could be re-purposed to use currentRegistryUrl
+// For now, let's have it use the globally stored currentRegistryUrl
 app.post('/api/is04/refresh', async (req, res) => {
-  console.log('Refreshing IS-04 resources via API call...');
-  await startIS04Discovery(); // Re-run discovery
-  res.json({ message: 'IS-04 resources refresh initiated.', data: discoveredResources });
+  console.log(`Refreshing IS-04 resources via API call using current registry: ${currentRegistryUrl}`);
+  await performIS04Discovery(currentRegistryUrl); // Re-run discovery with current URL
+  res.json({ message: `IS-04 resources refresh initiated for ${currentRegistryUrl}.`, data: discoveredResources });
 });
 
 // --- IS-05 Connection Management --- 
@@ -172,5 +207,5 @@ function initializeIS05ConnectionManager() {
 app.use(express.json());
 
 // Start core services
-startIS04Discovery(); // Initial discovery on startup
+// performIS04Discovery(currentRegistryUrl); // Initial discovery is now called at the end of its definition
 initializeIS05ConnectionManager();

@@ -6,25 +6,43 @@ function App() {
   const [receivers, setReceivers] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [registryUrl, setRegistryUrl] = useState('http://localhost:8870/x-nmos/query/v1.3'); // Default, user can change
 
-  const fetchResources = useCallback(async (isRefresh = false) => {
+  const fetchResources = useCallback(async (isRefresh = false, customUrl = null) => {
     setIsLoading(true);
     setError(null);
+    const urlToUse = customUrl || registryUrl;
+    if (!urlToUse || (!urlToUse.startsWith('http://') && !urlToUse.startsWith('https://'))) {
+      setError('Invalid Registry URL. It must start with http:// or https://');
+      setIsLoading(false);
+      setSenders([]);
+      setReceivers([]);
+      return;
+    }
+
     try {
-      const apiUrl = isRefresh ? '/api/is04/refresh' : '/api/is04/resources';
-      const method = isRefresh ? 'POST' : 'GET';
-      const response = await fetch(apiUrl, { method });
+      // Always use the new discover endpoint when a URL is explicitly provided or for refresh
+      // The GET /api/is04/resources can be used for initial load if we don't want to POST immediately
+      const apiUrl = '/api/is04/discover'; 
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ registryUrl: urlToUse }),
+      });
+
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorData = await response.json().catch(() => ({ message: `HTTP error! status: ${response.status}` }));
+        throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
       }
       const data = await response.json();
-      const resources = isRefresh ? data.data : data; // Refresh endpoint wraps data
+      const resources = data.data; // New discover endpoint always wraps in data
       
       setSenders(resources.senders || []);
       setReceivers(resources.receivers || []);
-      if (isRefresh) {
-        alert('Resources refreshed successfully!');
-      }
+      alert(data.message || 'Resources fetched successfully!');
+      setError(null); // Clear previous errors on success
     } catch (e) {
       console.error("Failed to fetch IS-04 resources:", e);
       setError(`Failed to load resources: ${e.message}. Ensure backend is running and NMOS_REGISTRY_URL is accessible by the backend.`);
@@ -35,8 +53,14 @@ function App() {
   }, []);
 
   useEffect(() => {
-    fetchResources();
-  }, [fetchResources]);
+    // Fetch resources on initial load with the default or previously set registryUrl
+    // We could make this conditional or based on a button click if preferred
+    if (registryUrl) fetchResources(false, registryUrl); 
+  }, []); // Run once on mount, or when registryUrl is first set if we want to auto-fetch
+
+  const handleDiscover = () => {
+    fetchResources(true, registryUrl); // Pass true for isRefresh to indicate a user action, and the current URL
+  };
 
   const [connectionStatus, setConnectionStatus] = useState('');
 
@@ -77,9 +101,19 @@ function App() {
     <div className="App">
       <header className="App-header">
         <h1>Vega-NMOS Control Panel</h1>
-        <button onClick={() => fetchResources(true)} disabled={isLoading}>
-          {isLoading ? 'Refreshing...' : 'Refresh IS-04 Resources'}
-        </button>
+        <div className="registry-input-container">
+          <label htmlFor="registryUrl">NMOS Registry URL (Query API v1.x):</label>
+          <input 
+            type="text" 
+            id="registryUrl" 
+            value={registryUrl}
+            onChange={(e) => setRegistryUrl(e.target.value)}
+            placeholder="e.g., http://localhost:8870/x-nmos/query/v1.3"
+          />
+          <button onClick={handleDiscover} disabled={isLoading || !registryUrl}>
+            {isLoading ? 'Discovering...' : 'Discover/Refresh Resources'}
+          </button>
+        </div>
       </header>
       {error && <p className="error-message">{error}</p>}
       {connectionStatus && <p className="status-message">{connectionStatus}</p>}
