@@ -48,7 +48,9 @@ let discoveredResources = {
 };
 
 async function fetchFromRegistry(resourceType, registryUrlToUse) {
-  const fullUrl = `${registryUrlToUse}/${resourceType}`.replace(/\/?$/, `/${resourceType}`); // Ensure correct slashes
+  // Ensure registryUrlToUse does not end with a slash, then append the resourceType
+  const baseUrl = registryUrlToUse.replace(/\/?$/, ''); // Remove trailing slash if any
+  const fullUrl = `${baseUrl}/${resourceType}`;
   console.log(`Attempting to fetch ${resourceType} from ${fullUrl}`);
   try {
     const response = await axios.get(fullUrl);
