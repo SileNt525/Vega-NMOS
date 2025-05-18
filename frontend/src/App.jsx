@@ -58,6 +58,35 @@ function App() {
     if (registryUrl) fetchResources(false, registryUrl); 
   }, []); // Run once on mount, or when registryUrl is first set if we want to auto-fetch
 
+  const handleStopConnection = async () => {
+    setIsLoading(true);
+    setError(null);
+    setConnectionStatus('Attempting to stop connection to Registry...');
+
+    try {
+      const response = await fetch('/api/nmos/stop-registry', {
+        method: 'POST',
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.message || `Stop connection failed with status: ${response.status}`);
+      }
+
+      setConnectionStatus(result.message || 'Connection to Registry stopped successfully.');
+      // Optionally, clear discovered resources as the connection is stopped
+      setSenders([]);
+      setReceivers([]);
+
+    } catch (e) {
+      console.error("Failed to stop connection:", e);
+      setError(`Stop Connection Error: ${e.message}`);
+      setConnectionStatus(''); // Clear status on error
+    }
+    setIsLoading(false);
+  };
+
   const handleDiscover = () => {
     fetchResources(true, registryUrl); // Pass true for isRefresh to indicate a user action, and the current URL
   };
@@ -113,6 +142,7 @@ function App() {
           <button onClick={handleDiscover} disabled={isLoading || !registryUrl}>
             {isLoading ? 'Discovering...' : 'Discover/Refresh Resources'}
           </button>
+          <button onClick={handleStopConnection} disabled={isLoading}>停止连接 Registry</button>
         </div>
       </header>
       {error && <p className="error-message">{error}</p>}

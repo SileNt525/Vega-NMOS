@@ -135,7 +135,10 @@ server.listen(PORT, () => {
   registerWithRegistry();
 
   // Start periodic heartbeat
-  setInterval(sendHeartbeat, NMOS_HEARTBEAT_INTERVAL_MS);
+  heartbeatInterval = setInterval(sendHeartbeat, NMOS_HEARTBEAT_INTERVAL_MS);
+
+  // Initialize IS-05 Connection Manager
+  initializeIS05ConnectionManager();
 });
 
 const axios = require('axios');
@@ -191,10 +194,152 @@ async function performIS04Discovery(registryUrl) {
 
   console.log('IS-04 Discovery complete for:', registryUrl);
   // TODO: Implement WebSocket subscription for real-time updates (would also need to handle registryUrl changes)
+  subscribeToRegistryUpdates(registryUrl);
 }
 
-// Initial discovery on startup using the default/env URL
-performIS04Discovery(currentRegistryUrl);
+// --- IS-04 WebSocket Subscription ---
+let registryWebSocket = null;
+let heartbeatInterval = null;
+
+async function createSubscription(registryUrl) {
+  const subscriptionsUrl = `${registryUrl.replace(/\/?$/, '')}/subscriptions`;
+  console.log(`Attempting to create IS-04 subscription at ${subscriptionsUrl}`);
+  try {
+    const response = await axios.post(subscriptionsUrl, {
+      max_update_rate_ms: 100, // Request updates at most every 100ms
+      resource_path: '/'
+    });
+    console.log(`Subscription creation successful: ${response.status}`);
+    return response.data;
+  } catch (error) {
+    console.error(`Error creating IS-04 subscription:`, error.message);
+    if (error.response) {
+      console.error('Error details:', error.response.status, error.response.data);
+    }
+    return null;
+  }
+}
+
+function subscribeToRegistryUpdates(registryUrl) {
+  // Close existing connection if any
+  if (registryWebSocket) {
+    registryWebSocket.close();
+  }
+
+  createSubscription(registryUrl)
+    .then(subscription => {
+      if (subscription && subscription.ws_href) {
+        const wsUrl = subscription.ws_href.replace(/^http/, 'ws'); // Convert http/https to ws/wss
+        console.log(`Connecting to IS-04 WebSocket: ${wsUrl}`);
+        registryWebSocket = new WebSocket(wsUrl);
+
+        registryWebSocket.onopen = () => {
+          console.log('IS-04 WebSocket connected.');
+        };
+
+        registryWebSocket.onmessage = (event) => {
+          // console.log('Received IS-04 WebSocket message:', event.data); // Log every message can be noisy
+          try {
+            const grain = JSON.parse(event.data);
+            handleDataGrain(grain);
+          } catch (error) {
+            console.error('Error parsing IS-04 WebSocket message:', error);
+          }
+        };
+
+        registryWebSocket.onerror = (error) => {
+          console.error('IS-04 WebSocket error:', error.message);
+        };
+
+        registryWebSocket.onclose = (event) => {
+          console.log(`IS-04 WebSocket closed: Code=${event.code}, Reason=${event.reason}`);
+          // Attempt to reconnect after a delay
+          setTimeout(() => subscribeToRegistryUpdates(registryUrl), 5000); // Retry after 5 seconds
+        };
+      } else {
+        console.error('Failed to create subscription or get WebSocket URL. Retrying in 5 seconds...');
+        setTimeout(() => subscribeToRegistryUpdates(registryUrl), 5000); // Retry subscription creation
+      }
+    })
+    .catch(error => {
+      console.error('Error in subscription process:', error);
+      setTimeout(() => subscribeToRegistryUpdates(registryUrl), 5000); // Retry subscription creation on promise rejection
+    });
+}
+
+// Function to handle incoming Data Grains
+function handleDataGrain(grain) {
+  if (grain.grain_type === 'event' && grain.data && Array.isArray(grain.data)) {
+    grain.data.forEach(change => {
+      const resourcePath = change.path;
+      const resourceType = resourcePath.split('/')[1]; // e.g., 'nodes', 'devices'
+      const resourceId = resourcePath.split('/')[2]; // e.g., '123e4567...' 
+
+      if (!resourceType || !resourceId) {
+        console.warn('Received malformed data grain path:', resourcePath);
+        return;
+      }
+
+      // Update discoveredResources based on change type (add, remove, modify, sync)
+      if (change.post && !change.pre) { // Add
+        console.log(`Resource added: ${resourceType}/${resourceId}`);
+        // Add the new resource to the appropriate array in discoveredResources
+        if (discoveredResources[resourceType]) {
+          discoveredResources[resourceType].push(change.post);
+        } else {
+           console.warn(`Unknown resource type in data grain: ${resourceType}`);
+        }
+      } else if (!change.post && change.pre) { // Remove
+        console.log(`Resource removed: ${resourceType}/${resourceId}`);
+        // Remove the resource from the appropriate array in discoveredResources
+        if (discoveredResources[resourceType]) {
+          discoveredResources[resourceType] = discoveredResources[resourceType].filter(res => res.id !== resourceId);
+        } else {
+           console.warn(`Unknown resource type in data grain: ${resourceType}`);
+        }
+      } else if (change.post && change.pre) { // Modify or Sync
+         // Check if it's a sync event (pre and post are the same content)
+         const isSync = JSON.stringify(change.pre) === JSON.stringify(change.post);
+         if (isSync) {
+            console.log(`Resource sync: ${resourceType}/${resourceId}`);
+            // For sync, we might replace the existing resource or ensure it's present
+            if (discoveredResources[resourceType]) {
+               const index = discoveredResources[resourceType].findIndex(res => res.id === resourceId);
+               if (index !== -1) {
+                  discoveredResources[resourceType][index] = change.post;
+               } else {
+                  // If not found during sync, add it
+                  discoveredResources[resourceType].push(change.post);
+               }
+            } else {
+               console.warn(`Unknown resource type in data grain for sync: ${resourceType}`);
+            }
+         } else { // Modify
+            console.log(`Resource modified: ${resourceType}/${resourceId}`);
+            // Find and update the resource in the appropriate array
+            if (discoveredResources[resourceType]) {
+              const index = discoveredResources[resourceType].findIndex(res => res.id === resourceId);
+              if (index !== -1) {
+                discoveredResources[resourceType][index] = change.post;
+              } else {
+                 console.warn(`Modified resource not found in discoveredResources: ${resourceType}/${resourceId}`);
+                 // If modified resource is not found, add it (might happen if initial discovery missed it)
+                 discoveredResources[resourceType].push(change.post);
+              }
+            } else {
+               console.warn(`Unknown resource type in data grain for modify: ${resourceType}`);
+            }
+         }
+      }
+      // Notify frontend about the resource change via WebSocket
+      wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(JSON.stringify({ type: 'nmos_resource_update', data: { resourceType, resourceId, change } }));
+        }
+      });
+    });
+  }
+}
 
 // API endpoint for frontend to get discovered resources
 app.post('/api/is04/discover', async (req, res) => {
@@ -231,6 +376,36 @@ app.post('/api/is04/refresh', async (req, res) => {
   await performIS04Discovery(currentRegistryUrl); // Re-run discovery with current URL
   res.json({ message: `IS-04 resources refresh initiated for ${currentRegistryUrl}.`, data: discoveredResources });
 });
+
+// API endpoint to stop connection to NMOS Registry
+app.post('/api/nmos/stop-registry', (req, res) => {
+  console.log('Received request to stop NMOS Registry connection.');
+
+  // Stop heartbeat
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+    heartbeatInterval = null;
+    console.log('NMOS heartbeat stopped.');
+  }
+
+  // Close WebSocket connection
+  if (registryWebSocket) {
+    registryWebSocket.close();
+    registryWebSocket = null;
+    console.log('IS-04 WebSocket connection closed.');
+  }
+
+  // TODO: Implement logic to unregister from the registry if necessary
+
+  res.json({ message: 'Connection to NMOS Registry stopped.' });
+});
+
+// --- IS-05 Connection Management --- 
+function initializeIS05ConnectionManager() {
+  console.log(`Refreshing IS-04 resources via API call using current registry: ${currentRegistryUrl}`);
+  await performIS04Discovery(currentRegistryUrl); // Re-run discovery with current URL
+  res.json({ message: `IS-04 resources refresh initiated for ${currentRegistryUrl}.`, data: discoveredResources });
+};
 
 // --- IS-05 Connection Management --- 
 function initializeIS05ConnectionManager() {
@@ -312,6 +487,72 @@ function initializeIS05ConnectionManager() {
       }
     }
   });
+
+  // IS-05 Disconnect endpoint
+  app.post('/api/is05/disconnect', async (req, res) => {
+    const { receiverId } = req.body;
+    console.log(`Attempting IS-05 disconnection for Receiver ${receiverId}`);
+
+    if (!receiverId) {
+      return res.status(400).json({ message: 'receiverId is required.' });
+    }
+
+    const receiver = discoveredResources.receivers.find(r => r.id === receiverId);
+
+    if (!receiver) {
+      return res.status(404).json({ message: `Receiver with ID ${receiverId} not found.` });
+    }
+
+    // Find the device associated with the receiver to get its API endpoint
+    const receiverDevice = discoveredResources.devices.find(d => d.id === receiver.device_id);
+    if (!receiverDevice || !receiverDevice.controls || receiverDevice.controls.length === 0) {
+        return res.status(500).json({ message: `Control endpoint for receiver's device ${receiver.device_id} not found.` });
+    }
+    // Assuming the first control URL is the correct one and it's for Connection API v1.1
+    const connectionApiBaseUrl = receiverDevice.controls.find(c => c.type === "urn:x-nmos:control:sr-ctrl/v1.1" || c.type === "urn:x-nmos:control:sr-ctrl/v1.0" )?.href;
+    if(!connectionApiBaseUrl){
+        console.error('Suitable IS-05 control endpoint not found for device:', receiverDevice);
+        return res.status(500).json({ message: `Suitable IS-05 control endpoint not found for device ${receiver.device_id}. Controls: ${JSON.stringify(receiverDevice.controls)}` });
+    }
+
+    const targetUrl = `${connectionApiBaseUrl.replace(/\/?$/, '')}/receivers/${receiverId}/staged`;
+    
+    // IS-05 disconnect is achieved by setting sender_id to null and master_enable to false
+    const payload = {
+      sender_id: null,
+      master_enable: false, 
+    };
+
+    console.log(`Sending IS-05 PATCH to ${targetUrl} with payload:`, JSON.stringify(payload));
+
+    try {
+      const patchResponse = await axios.patch(targetUrl, payload, {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 5000 // 5 seconds timeout
+      });
+      
+      console.log('IS-05 PATCH successful:', patchResponse.status, patchResponse.data);
+      res.json({ 
+        message: `Successfully sent IS-05 disconnection request for Receiver ${receiverId}.`, 
+        receiverResponse: patchResponse.data 
+      });
+
+    } catch (error) {
+      console.error(`Error during IS-05 PATCH to ${targetUrl}:`, error.message);
+      if (error.response) {
+        console.error('Error details:', error.response.status, error.response.data);
+        res.status(error.response.status || 500).json({
+          message: `Failed to disconnect Receiver ${receiverId}. Receiver API error.`, 
+          error: error.response.data
+        });
+      } else if (error.request) {
+        console.error('Error request:', error.request);
+        res.status(504).json({ message: `Failed to disconnect: No response from receiver at ${targetUrl}.` });
+      } else {
+        res.status(500).json({ message: 'Failed to disconnect: Internal server error while making PATCH request.' });
+      }
+    }
+  });
 }
 
 // Middleware for parsing JSON bodies (important for POST requests like IS-05)
@@ -319,4 +560,3 @@ app.use(express.json());
 
 // Start core services
 // performIS04Discovery(currentRegistryUrl); // Initial discovery is now called at the end of its definition
-initializeIS05ConnectionManager();
