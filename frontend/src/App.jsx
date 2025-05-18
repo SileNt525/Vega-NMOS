@@ -108,7 +108,7 @@ function App() {
             id="registryUrl" 
             value={registryUrl}
             onChange={(e) => setRegistryUrl(e.target.value)}
-            placeholder="e.g., http://localhost:8870/x-nmos/query/v1.3"
+            placeholder="e.g., http:///0.11.1.14:8010/x-nmos/query/v1.3"
           />
           <button onClick={handleDiscover} disabled={isLoading || !registryUrl}>
             {isLoading ? 'Discovering...' : 'Discover/Refresh Resources'}
