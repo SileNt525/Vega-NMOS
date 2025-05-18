@@ -6,7 +6,7 @@ function App() {
   const [receivers, setReceivers] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [registryUrl, setRegistryUrl] = useState('http://10.11.1.14:8010/x-nmos/query/v1.3'); // Default, user can change
+  const [registryUrl, setRegistryUrl] = useState(''); // Default, user can change
 
   const fetchResources = useCallback(async (isRefresh = false, customUrl = null) => {
     setIsLoading(true);
