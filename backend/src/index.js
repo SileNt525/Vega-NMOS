@@ -401,14 +401,7 @@ app.post('/api/nmos/stop-registry', (req, res) => {
 });
 
 // --- IS-05 Connection Management --- 
-function initializeIS05ConnectionManager() {
-  console.log(`Refreshing IS-04 resources via API call using current registry: ${currentRegistryUrl}`);
-  await performIS04Discovery(currentRegistryUrl); // Re-run discovery with current URL
-  res.json({ message: `IS-04 resources refresh initiated for ${currentRegistryUrl}.`, data: discoveredResources });
-};
-
-// --- IS-05 Connection Management --- 
-function initializeIS05ConnectionManager() {
+async function initializeIS05ConnectionManager() {
   console.log('Initializing IS-05 Connection Manager...');
   // TODO: Implement API endpoints for IS-05 operations
   // e.g., POST /connect, POST /disconnect
