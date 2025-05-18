@@ -37,7 +37,7 @@ server.listen(PORT, () => {
 const axios = require('axios');
 
 // --- IS-04 Discovery --- 
-let currentRegistryUrl = process.env.NMOS_REGISTRY_URL || 'http://localhost:8870/x-nmos/query/v1.3'; // Default, can be overridden by env var or API
+let currentRegistryUrl = process.env.NMOS_REGISTRY_URL || 'http://10.11.1.14:8010/x-nmos/query/v1.3'; // Default, can be overridden by env var or API
 let discoveredResources = {
   nodes: [],
   devices: [],
