@@ -9,10 +9,9 @@ export default defineConfig({
     port: 5173,      // Explicitly define port (optional, Vite default is 5173)
     proxy: {
       '/api': {
-        target: 'http://backend:3000', // Backend server address in development
+        target: 'http://backend:3000', // Backend server address
         changeOrigin: true,
-        secure: false,
-        ws: true, // Enable WebSocket proxy
+        // rewrite: (path) => path.replace(/^\/api/, ''), // Optional: if backend doesn't expect /api prefix
       }
     }
   }
