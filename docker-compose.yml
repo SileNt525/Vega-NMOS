@@ -21,7 +21,7 @@ services:
       - ./frontend:/usr/src/app
     depends_on:
       - backend
-    command: npm run dev # 直接使用npm run dev命令启动开发服务器
+    command: npm install && npm run dev # 直接使用npm run dev命令启动开发服务器
 
 networks:
   default:
