@@ -633,10 +633,21 @@ function handleDataGrain(grain) {
       case '/flows/':
       case '/senders/':
       case '/receivers/':
+        if (!Array.isArray(data)) {
+          console.error('Invalid data format: expected array', data);
+          return;
+        }
+
         data.forEach(changeData => {
+          if (!changeData || !changeData.path) {
+            console.warn('Invalid change data format:', changeData);
+            return;
+          }
+
           const resourcePath = changeData.path;
-          const resourceType = resourcePath.split('/')[1];
-          const resourceId = resourcePath.split('/')[2];
+          const pathParts = resourcePath.split('/');
+          const resourceType = pathParts[1];
+          const resourceId = pathParts[2];
           
           if (!resourceType || !resourceId) {
             console.warn('Received malformed data grain path:', resourcePath);
@@ -644,57 +655,48 @@ function handleDataGrain(grain) {
           }
           
           // 处理不同类型的变更
+          const resourceArray = discoveredResources[resourceType];
+          if (!Array.isArray(resourceArray)) {
+            console.warn(`Unknown resource type: ${resourceType}`);
+            return;
+          }
+
+          let changeType = '';
           if (changeData.post && !changeData.pre) { // 新增资源
+            changeType = 'added';
             console.log(`Resource added: ${resourceType}/${resourceId}`);
-            if (discoveredResources[resourceType]) {
-              discoveredResources[resourceType].push(changeData.post);
-            }
+            resourceArray.push(changeData.post);
           } else if (!changeData.post && changeData.pre) { // 移除资源
+            changeType = 'removed';
             console.log(`Resource removed: ${resourceType}/${resourceId}`);
-            if (discoveredResources[resourceType]) {
-              discoveredResources[resourceType] = discoveredResources[resourceType].filter(
-                res => res.id !== resourceId
-              );
+            const index = resourceArray.findIndex(res => res.id === resourceId);
+            if (index !== -1) {
+              resourceArray.splice(index, 1);
             }
           } else if (changeData.post && changeData.pre) { // 修改或同步
             const isSync = JSON.stringify(changeData.pre) === JSON.stringify(changeData.post);
-            if (isSync) {
-              console.log(`Resource sync: ${resourceType}/${resourceId}`);
-              if (discoveredResources[resourceType]) {
-                const index = discoveredResources[resourceType].findIndex(
-                  res => res.id === resourceId
-                );
-                if (index !== -1) {
-                  discoveredResources[resourceType][index] = changeData.post;
-                } else {
-                  discoveredResources[resourceType].push(changeData.post);
-                }
-              }
-            } else { // 修改
-              console.log(`Resource modified: ${resourceType}/${resourceId}`);
-              if (discoveredResources[resourceType]) {
-                const index = discoveredResources[resourceType].findIndex(
-                  res => res.id === resourceId
-                );
-                if (index !== -1) {
-                  discoveredResources[resourceType][index] = changeData.post;
-                } else {
-                  discoveredResources[resourceType].push(changeData.post);
-                }
-              }
+            changeType = isSync ? 'synced' : 'modified';
+            console.log(`Resource ${changeType}: ${resourceType}/${resourceId}`);
+            const index = resourceArray.findIndex(res => res.id === resourceId);
+            if (index !== -1) {
+              resourceArray[index] = changeData.post;
+            } else {
+              resourceArray.push(changeData.post);
             }
           }
           
           // 通知前端资源变更
+          const updateMessage = {
+            type: 'nmos_resource_update',
+            resourceType,
+            resourceId,
+            changeType,
+            data: changeData.post || null
+          };
+
           wss.clients.forEach(client => {
             if (client.readyState === WebSocket.OPEN) {
-              client.send(JSON.stringify({
-                type: 'nmos_resource_update',
-                resourceType,
-                resourceId,
-                changeType: changeData.post && !changeData.pre ? 'added' : 
-                          !changeData.post && changeData.pre ? 'removed' : 'modified'
-              }));
+              client.send(JSON.stringify(updateMessage));
             }
           });
         });
@@ -705,16 +707,19 @@ function handleDataGrain(grain) {
     }
   } catch (error) {
     console.error('Error processing data grain:', error);
+    const errorMessage = {
+      type: 'nmos_error',
+      message: 'Failed to process registry update',
+      details: error.message
+    };
+
     wss.clients.forEach(client => {
       if (client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify({
-          type: 'nmos_error',
-          message: 'Failed to process registry update',
-          details: error.message
-        }));
+        client.send(JSON.stringify(errorMessage));
       }
     });
-  }}
+  }
+}
       const resourcePath = change.path;
       const resourceType = resourcePath.split('/')[1]; // e.g., 'nodes', 'devices'
       const resourceId = resourcePath.split('/')[2]; // e.g., '123e4567...' 
