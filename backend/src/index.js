@@ -290,39 +290,77 @@ async function fetchFromRegistry(resourceType, registryUrlToUse) {
 // Helper function to fetch resources with pagination
 async function fetchPaginatedResources(startUrl) {
   let allResources = [];
-  let currentUrl = startUrl;
-  console.log(`[fetchPaginatedResources] Starting pagination fetch from: ${startUrl}`);
+  let currentPageUrl = startUrl;
+  console.log(`[fetchPaginatedResources] Starting pagination fetch process from: ${startUrl}`);
 
-  while (currentUrl) {
-    console.log(`[fetchPaginatedResources] Fetching page from: ${currentUrl}`);
+  // Step 1: Fetch the first page to find the 'last' link
+  let lastPageUrl = null;
+  try {
+    console.log(`[fetchPaginatedResources] Fetching initial page to find 'last' link: ${startUrl}`);
+    const initialResponse = await axios.get(startUrl);
+    console.log(`[fetchPaginatedResources] Initial response status: ${initialResponse.status}, Link header present: ${!!initialResponse.headers.link}`);
+
+    lastPageUrl = getLinkByRel(initialResponse.headers.link, 'last');
+    console.log(`[fetchPaginatedResources] Found 'last' link: ${lastPageUrl}`);
+
+    // If no 'last' link is found, assume the initial page is the only page or the last page.
+    // In this case, we'll just process the initial response data and stop.
+    if (!lastPageUrl) {
+        console.log(`[fetchPaginatedResources] No 'last' link found. Processing initial page data.`);
+        if (initialResponse.data && initialResponse.data.length > 0) {
+            allResources = allResources.concat(initialResponse.data);
+        }
+        return allResources; // Stop here if no pagination links
+    }
+
+  } catch (error) {
+    console.error(`Error fetching initial page from ${startUrl}:`, error.message);
+    if (error.response) {
+      console.error('Error details:', error.response.status, error.response.data);
+    }
+    return []; // Return empty array on error
+  }
+
+  // Step 2: Start fetching from the last page backwards using 'prev' links
+  currentPageUrl = lastPageUrl;
+  console.log(`[fetchPaginatedResources] Starting backward pagination from 'last' link: ${currentPageUrl}`);
+
+  while (currentPageUrl) {
+    console.log(`[fetchPaginatedResources] Fetching page from: ${currentPageUrl}`);
     try {
-      const response = await axios.get(currentUrl);
+      const response = await axios.get(currentPageUrl);
       console.log(`[fetchPaginatedResources] Received response status: ${response.status}, Link header present: ${!!response.headers.link}`);
-      // Check if the response data is empty. If so, we've reached the last page.
-      if (!response.data || response.data.length === 0) {
-        console.log('[fetchPaginatedResources] Received empty data, assuming last page.');
-        currentUrl = null; // Terminate the loop
+
+      // Add received data (if any)
+      if (response.data && response.data.length > 0) {
+        // Prepend data because we are fetching backwards
+        allResources = response.data.concat(allResources);
       } else {
-        allResources = allResources.concat(response.data);
-        const nextLink = getNextLink(response.headers.link);
-        // If getNextLink returns null, the loop should terminate
-        currentUrl = nextLink;
+          // If data is empty, stop fetching. This handles the user's case where the last page might have an empty response body.
+          console.log(`[fetchPaginatedResources] Received empty data, stopping backward pagination.`);
+          currentPageUrl = null; // Stop the loop
+          continue; // Skip finding the next link if data is empty
       }
+
+      // Determine previous URL based on 'prev' Link header
+      const prevLink = getLinkByRel(response.headers.link, 'prev');
+      currentPageUrl = prevLink; // Continue if prevLink exists, stop if null
+
     } catch (error) {
-      console.error(`Error fetching paginated resources from ${currentUrl}:`, error.message);
+      console.error(`Error fetching paginated resources from ${currentPageUrl}:`, error.message);
       if (error.response) {
         console.error('Error details:', error.response.status, error.response.data);
       }
       // Stop fetching on error
-      currentUrl = null; // Ensure loop terminates on error
+      currentPageUrl = null; // Ensure loop terminates on error
     }
   }
   return allResources;
 }
 
-// Helper function to parse Link header and find next page URL
-function getNextLink(linkHeader) {
-  console.log(`[getNextLink] Processing Link header: ${linkHeader}`);
+// Helper function to parse Link header and find a link by rel type
+function getLinkByRel(linkHeader, relType) {
+  console.log(`[getLinkByRel] Processing Link header: ${linkHeader} for rel="${relType}"`);
   if (!linkHeader) return null;
   const links = linkHeader.split(',');
   for (const link of links) {
@@ -331,18 +369,18 @@ function getNextLink(linkHeader) {
     const urlPart = parts[0].trim();
     const relPart = parts[1].trim();
 
-    if (relPart === 'rel="next"') {
+    if (relPart === `rel="${relType}"`) {
       const urlMatch = urlPart.match(/^<(.*)>$/);
       if (urlMatch && urlMatch[1]) {
-        console.log(`[getNextLink] Found next link: ${urlMatch[1]}`);
+        console.log(`[getLinkByRel] Found ${relType} link: ${urlMatch[1]}`);
         // Ensure the returned URL is absolute if necessary, or handle relative URLs
         // For now, assuming the registry provides absolute URLs in the Link header
         return urlMatch[1];
       }
     }
   }
-  console.log(`[getNextLink] No next link found.`);
-  return null; // Explicitly return null if no 'rel="next"' link is found
+  console.log(`[getLinkByRel] No rel="${relType}" link found.`);
+  return null; // Explicitly return null if no link with the specified rel is found
 }
 
 // Function to perform IS-04 discovery
