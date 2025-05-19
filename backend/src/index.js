@@ -965,6 +965,7 @@ async function initializeIS05ConnectionManager() {
                 type: contentType
             };
             console.log(`成功获取发送端 ${senderId} 的transportfile。`);
+            console.log('获取到的transportfile内容:', transportFile);
         } else {
             console.warn(`从发送端 ${senderId} 获取到的transportfile为空`);
         }
@@ -996,7 +997,7 @@ async function initializeIS05ConnectionManager() {
         console.log('未添加transportfile到请求负载中，将使用默认transport_params');
     }
 
-    console.log(`发送IS-05 PATCH请求到 ${targetUrl}，负载:`, JSON.stringify(payload));
+    console.log(`发送IS-05 PATCH请求到 ${targetUrl}，负载:`, JSON.stringify(payload, null, 2));
     try {
         // 发送PATCH请求到接收端的staged端点
         const patchResponse = await axios.patch(targetUrl, payload, {
