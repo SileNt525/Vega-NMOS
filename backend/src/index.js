@@ -2,6 +2,7 @@ const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const http = require('http');
 const WebSocket = require('ws');
+const os = require('os');
 
 const app = express();
 const server = http.createServer(app);
@@ -16,9 +17,46 @@ const NMOS_HEARTBEAT_INTERVAL_MS = parseInt(process.env.NMOS_HEARTBEAT_INTERVAL_
 // Define NMOS Node, Device, etc. resources for this backend instance
 const NODE_ID = uuidv4();
 const DEVICE_ID = uuidv4();
-// Define Sender/Receiver IDs if needed later for virtual resources
-// const SENDER_ID = uuidv4();
-// const RECEIVER_ID = uuidv4();
+const VERSION = '1.0.0';
+const HOSTNAME = os.hostname();
+
+// 构建控制器的NMOS资源对象
+const controllerResources = {
+  node: {
+    id: NODE_ID,
+    version: VERSION,
+    label: 'Vega-NMOS-Panel',
+    href: `http://${HOSTNAME}:3000`,
+    hostname: HOSTNAME,
+    caps: {},
+    services: [],
+    api: {
+      endpoints: [
+        {
+          host: HOSTNAME,
+          port: 3000,
+          protocol: 'http'
+        }
+      ],
+      versions: ['v1.0']
+    },
+    clocks: [],
+    interfaces: []
+  },
+  device: {
+    id: DEVICE_ID,
+    version: VERSION,
+    label: 'Vega-NMOS-Panel Controller',
+    type: 'urn:x-nmos:device:control',
+    node_id: NODE_ID,
+    controls: [
+      {
+        href: `http://${HOSTNAME}:3000/api/v1`,
+        type: 'urn:x-nmos:control:sr-ctrl/v1.1'
+      }
+    ]
+  }
+};
 
 const nodeResource = {
   id: NODE_ID,
@@ -53,12 +91,78 @@ const deviceResource = {
   tags: {},
   node_id: NODE_ID,
   type: 'urn:nmos:device:generic',
-  senders: [], // Add sender IDs if virtual senders are created
-  receivers: [], // Add receiver IDs if virtual receivers are created
-  controls: [
-    // Add control endpoints if this device exposes any (e.g., IS-05 Connection API if implemented here)
-  ]
+  senders: [],
+receivers: [],
 };
+
+// 注册控制器节点和设备到Registry
+
+// 最大重试次数和重试延迟配置
+const MAX_REGISTRATION_RETRIES = 3;
+const RETRY_DELAY_MS = 2000;
+
+async function registerControllerToRegistry() {
+  let retryCount = 0;
+  heartbeatInterval = null; // Remove redundant declaration
+
+  const updateResourceVersion = (resource) => {
+    resource.version = Date.now().toString();
+    return resource;
+  };
+
+  const registerResource = async (type, resource) => {
+    const registrationUrl = `${NMOS_REGISTRY_REGISTRATION_URL}/resource/${type}s/${resource.id}`;
+    try {
+      const response = await axios.post(registrationUrl, updateResourceVersion(resource));
+      console.log(`成功注册控制器${type}资源: ${response.status}`);
+      return true;
+    } catch (error) {
+      console.error(`注册${type}资源失败:`, error.message);
+      if (error.response) {
+        console.error('错误详情:', error.response.status, error.response.data);
+      }
+      return false;
+    }
+  };
+
+  const sendHeartbeats = async () => {
+    const heartbeatUrl = `${NMOS_REGISTRY_REGISTRATION_URL}/health/nodes/${controllerResources.node.id}`;
+    try {
+      await axios.post(heartbeatUrl);
+    } catch (error) {
+      console.error('心跳更新失败:', error.message);
+      if (error.response && error.response.status === 404) {
+        console.log('节点未注册或已过期，尝试重新注册...');
+        clearInterval(heartbeatInterval);
+        await registerWithRetry();
+      }
+    }
+  };
+
+  const registerWithRetry = async () => {
+    while (retryCount < MAX_REGISTRATION_RETRIES) {
+      const nodeSuccess = await registerResource('node', controllerResources.node);
+      const deviceSuccess = nodeSuccess && await registerResource('device', controllerResources.device);
+
+      if (nodeSuccess && deviceSuccess) {
+        console.log('所有资源注册成功');
+        // 启动心跳
+        heartbeatInterval = setInterval(sendHeartbeats, NMOS_HEARTBEAT_INTERVAL_MS);
+        return true;
+      }
+
+      retryCount++;
+      if (retryCount < MAX_REGISTRATION_RETRIES) {
+        console.log(`注册失败，${RETRY_DELAY_MS/1000}秒后进行第${retryCount + 1}次重试...`);
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+      }
+    }
+    console.error(`达到最大重试次数(${MAX_REGISTRATION_RETRIES})，注册失败`);
+    return false;
+  };
+
+  return registerWithRetry();
+}; // Add missing semicolon
 
 // Function to register resources with the NMOS Registry
 async function registerWithRegistry() {
@@ -127,20 +231,24 @@ wss.on('connection', (ws) => {
   ws.send('Welcome to Vega-NMOS WebSocket server!');
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   console.log(`Backend server is listening on port ${PORT}`);
   console.log(`WebSocket server is running on ws://localhost:${PORT}`);
 
   // Perform initial registration with NMOS Registry
-  registerWithRegistry();
+  await registerWithRegistry();
 
   // Start periodic heartbeat
   heartbeatInterval = setInterval(sendHeartbeat, NMOS_HEARTBEAT_INTERVAL_MS);
 
   // Initialize IS-05 Connection Manager
-  initializeIS05ConnectionManager();
+  await initializeIS05ConnectionManager();
+
+  // Register controller resources
+  await registerControllerToRegistry();
 });
 
+// Move axios import to top of file to fix ReferenceError
 const axios = require('axios');
 
 // --- IS-04 Discovery --- 
@@ -199,7 +307,6 @@ async function performIS04Discovery(registryUrl) {
 
 // --- IS-04 WebSocket Subscription ---
 let registryWebSocket = null;
-let heartbeatInterval = null;
 
 async function createSubscription(registryUrl) {
   const subscriptionsUrl = `${registryUrl.replace(/\/?$/, '')}/subscriptions`;
@@ -768,7 +875,7 @@ async function initializeIS05ConnectionManager() {
 }
 
 // Middleware for parsing JSON bodies (important for POST requests like IS-05)
-app.use(express.json());
+// Remove duplicate express.json() middleware
 
 // Start core services
 // performIS04Discovery(currentRegistryUrl); // Initial discovery is now called at the end of its definition

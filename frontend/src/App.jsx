@@ -150,39 +150,57 @@ function App() {
       {isLoading && !error && <p>Loading resources...</p>}
       <div className="container">
         <div className="resource-list">
-          <h2>Senders ({senders.length})</h2>
-          {senders.length === 0 && !isLoading && <p>No senders found.</p>}
-          <ul>
-            {senders.map((sender) => (
-              <li key={sender.id}>
-                <strong>{sender.label}</strong> (ID: {sender.id})<br />
-                Flow ID: {sender.flow_id}<br />
-                Transport: {sender.transport}
-                {/* Basic connect button - will be improved */}
-                {receivers.length > 0 && (
-                  <select onChange={(e) => e.target.value && handleConnect(sender.id, e.target.value)} defaultValue="">
-                    <option value="" disabled>Connect to Receiver...</option>
-                    {receivers.map(receiver => (
-                      <option key={receiver.id} value={receiver.id}>{receiver.label}</option>
-                    ))}
-                  </select>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div className="resource-list">
-          <h2>Receivers ({receivers.length})</h2>
-          {receivers.length === 0 && !isLoading && <p>No receivers found.</p>}
-          <ul>
-            {receivers.map((receiver) => (
-              <li key={receiver.id}>
-                <strong>{receiver.label}</strong> (ID: {receiver.id})<br />
-                Format: {receiver.format} <br />
-                Caps: {JSON.stringify(receiver.caps)}
-              </li>
-            ))}
-          </ul>
+          <div className="resource-lists">
+            <div className="resource-section">
+              <h2>发送端 ({senders.length})</h2>
+              {senders.length === 0 && !isLoading && <p>未发现发送端</p>}
+              <div className="resource-grid">
+                {senders.map((sender) => (
+                  <div key={sender.id} className="resource-card">
+                    <h3>{sender.label || '未命名发送端'}</h3>
+                    <div className="resource-details">
+                      <p>ID: {sender.id}</p>
+                      <p>Flow ID: {sender.flow_id}</p>
+                      <p>Transport: {sender.transport}</p>
+                    </div>
+                    {receivers.length > 0 && (
+                      <div className="connection-control">
+                        <select 
+                          onChange={(e) => e.target.value && handleConnect(sender.id, e.target.value)} 
+                          defaultValue=""
+                          className="receiver-select"
+                        >
+                          <option value="" disabled>选择接收端进行连接...</option>
+                          {receivers.map(receiver => (
+                            <option key={receiver.id} value={receiver.id}>
+                              {receiver.label || `接收端 ${receiver.id}`}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="resource-section">
+              <h2>接收端 ({receivers.length})</h2>
+              {receivers.length === 0 && !isLoading && <p>未发现接收端</p>}
+              <div className="resource-grid">
+                {receivers.map((receiver) => (
+                  <div key={receiver.id} className="resource-card">
+                    <h3>{receiver.label || '未命名接收端'}</h3>
+                    <div className="resource-details">
+                      <p>ID: {receiver.id}</p>
+                      <p>Format: {receiver.format}</p>
+                      <p>Capabilities: {JSON.stringify(receiver.caps, null, 2)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
