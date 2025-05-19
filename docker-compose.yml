@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile
     ports:
       - "3000:3000"
-    volumes:
+    volumes: []
     environment:
       - NODE_ENV=development
     command: npm run dev # 启动命令待后端项目初始化后确定
@@ -18,7 +18,7 @@ services:
       dockerfile: Dockerfile
     ports:
       - "5173:5173" # Vite 默认端口
-    volumes:
+    volumes: []
       - ./frontend:/usr/src/app
     depends_on:
       - backend
