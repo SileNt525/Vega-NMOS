@@ -241,11 +241,18 @@ server.listen(PORT, async () => {
   // Start periodic heartbeat
   heartbeatInterval = setInterval(sendHeartbeat, NMOS_HEARTBEAT_INTERVAL_MS);
 
+  console.log('Before initializing IS-05 Connection Manager...'); // Added log
   // Initialize IS-05 Connection Manager
   await initializeIS05ConnectionManager();
+  console.log('After initializing IS-05 Connection Manager.'); // Added log
 
   // Register controller resources
   await registerControllerToRegistry();
+
+  console.log('Before performing IS-04 Discovery...'); // Added log
+  // Perform initial IS-04 discovery
+  await performIS04Discovery(currentRegistryUrl);
+  console.log('After performing IS-04 Discovery.'); // Added log
 });
 
 // Move axios import to top of file to fix ReferenceError
@@ -280,34 +287,17 @@ async function fetchFromRegistry(resourceType, registryUrlToUse) {
   }
 }
 
-// Helper function to parse Link header and find next page URL
-function getNextLink(linkHeader) {
-  if (!linkHeader) return null;
-  const links = linkHeader.split(',');
-  for (const link of links) {
-    const parts = link.split(';');
-    if (parts.length < 2) continue;
-    const urlPart = parts[0].trim();
-    const relPart = parts[1].trim();
-
-    if (relPart === 'rel="next"') {
-      const urlMatch = urlPart.match(/^<(.*)>$/);
-      if (urlMatch && urlMatch[1]) {
-        return urlMatch[1];
-      }
-    }
-  }
-  return null;
-}
-
 // Helper function to fetch resources with pagination
 async function fetchPaginatedResources(startUrl) {
   let allResources = [];
   let currentUrl = startUrl;
+  console.log(`[fetchPaginatedResources] Starting pagination fetch from: ${startUrl}`); // Added log
 
   while (currentUrl) {
+    console.log(`[fetchPaginatedResources] Fetching page from: ${currentUrl}`); // Added log
     try {
       const response = await axios.get(currentUrl);
+      console.log(`[fetchPaginatedResources] Received response status: ${response.status}, Link header present: ${!!response.headers.link}`); // Added log
       allResources = allResources.concat(response.data);
       const nextLink = getNextLink(response.headers.link);
       currentUrl = nextLink;
@@ -321,6 +311,29 @@ async function fetchPaginatedResources(startUrl) {
     }
   }
   return allResources;
+}
+
+// Helper function to parse Link header and find next page URL
+function getNextLink(linkHeader) {
+  console.log(`[getNextLink] Processing Link header: ${linkHeader}`); // Added log
+  if (!linkHeader) return null;
+  const links = linkHeader.split(',');
+  for (const link of links) {
+    const parts = link.split(';');
+    if (parts.length < 2) continue;
+    const urlPart = parts[0].trim();
+    const relPart = parts[1].trim();
+
+    if (relPart === 'rel="next"') {
+      const urlMatch = urlPart.match(/^<(.*)>$/);
+      if (urlMatch && urlMatch[1]) {
+        console.log(`[getNextLink] Found next link: ${urlMatch[1]}`); // Added log
+        return urlMatch[1];
+      }
+    }
+  }
+  console.log(`[getNextLink] No next link found.`); // Added log
+  return null;
 }
 
 // Function to perform IS-04 discovery
