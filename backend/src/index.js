@@ -11,6 +11,8 @@ const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 3000;
 
 // NMOS Registration Configuration
+// Configure the NMOS Registry Registration API URL using the NMOS_REGISTRY_REGISTRATION_URL environment variable.
+// If the environment variable is not set, it defaults to 'http://10.11.1.14:8010/x-nmos/registration/v1.3'.
 const NMOS_REGISTRY_REGISTRATION_URL = process.env.NMOS_REGISTRY_REGISTRATION_URL || 'http://10.11.1.14:8010/x-nmos/registration/v1.3'; // Default Registration API URL
 const NMOS_HEARTBEAT_INTERVAL_MS = parseInt(process.env.NMOS_HEARTBEAT_INTERVAL_MS || '5000', 10); // Default heartbeat interval: 5 seconds
 
@@ -266,6 +268,8 @@ server.listen(PORT, async () => {
 const axios = require('axios');
 
 // --- IS-04 Discovery --- 
+// Configure the NMOS Registry Query API URL using the NMOS_REGISTRY_URL environment variable.
+// If the environment variable is not set, it defaults to 'http://10.11.1.14:8010/x-nmos/query/v1.3'.
 let currentRegistryUrl = process.env.NMOS_REGISTRY_URL || 'http://10.11.1.14:8010/x-nmos/query/v1.3'; // Default, can be overridden by env var or API
 let discoveredResources = {
   nodes: [],
