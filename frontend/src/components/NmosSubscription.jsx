@@ -7,7 +7,7 @@ export default function NmosSubscription({ onUpdate }) {
 
   useEffect(() => {
     // 连接到后端的WebSocket服务
-    const client = new W3CWebSocket(`ws://${window.location.hostname}:3000`);
+    const client = new W3CWebSocket(`ws://${window.location.hostname}:${window.location.port}/api/v1/ws/updates`);
     
     client.onopen = () => {
       console.log('WebSocket Connected');
