@@ -3,12 +3,26 @@ const { v4: uuidv4 } = require('uuid');
 const http = require('http');
 const WebSocket = require('ws');
 const os = require('os');
+const cors = require('cors');
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
 const PORT = process.env.PORT || 3000;
+
+// 配置 CORS
+app.use(cors());
+
+// 配置请求体解析
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// 请求日志中间件
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
+  next();
+});
 
 // NMOS Registration Configuration
 const NMOS_REGISTRY_REGISTRATION_URL = process.env.NMOS_REGISTRY_REGISTRATION_URL || 'http://10.11.1.14:8010/x-nmos/registration/v1.3'; // Default Registration API URL
