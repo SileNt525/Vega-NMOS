@@ -9,11 +9,8 @@ services:
       - "3000:3000"
     environment:
       - NODE_ENV=development
-    volumes:
-      - ./backend:/app
     command: npm run dev # 启动命令待后端项目初始化后确定
 
-services:
   frontend:
     build:
       context: ./frontend
