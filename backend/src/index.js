@@ -280,29 +280,96 @@ async function fetchFromRegistry(resourceType, registryUrlToUse) {
   }
 }
 
+// Helper function to parse Link header and find next page URL
+function getNextLink(linkHeader) {
+  if (!linkHeader) return null;
+  const links = linkHeader.split(',');
+  for (const link of links) {
+    const parts = link.split(';');
+    if (parts.length < 2) continue;
+    const urlPart = parts[0].trim();
+    const relPart = parts[1].trim();
+
+    if (relPart === 'rel="next"') {
+      const urlMatch = urlPart.match(/^<(.*)>$/);
+      if (urlMatch && urlMatch[1]) {
+        return urlMatch[1];
+      }
+    }
+  }
+  return null;
+}
+
+// Helper function to fetch resources with pagination
+async function fetchPaginatedResources(startUrl) {
+  let allResources = [];
+  let currentUrl = startUrl;
+
+  while (currentUrl) {
+    try {
+      const response = await axios.get(currentUrl);
+      allResources = allResources.concat(response.data);
+      const nextLink = getNextLink(response.headers.link);
+      currentUrl = nextLink;
+    } catch (error) {
+      console.error(`Error fetching paginated resources from ${currentUrl}:`, error.message);
+      if (error.response) {
+        console.error('Error details:', error.response.status, error.response.data);
+      }
+      // Stop fetching on error
+      currentUrl = null;
+    }
+  }
+  return allResources;
+}
+
+// Function to perform IS-04 discovery
 async function performIS04Discovery(registryUrl) {
-  console.log(`Performing IS-04 Discovery against Registry: ${registryUrl}`);
-  
-  // Clear previous results before new discovery
-  discoveredResources = {
-    nodes: [],
-    devices: [],
-    sources: [],
-    flows: [],
-    senders: [],
-    receivers: [],
-  };
+  console.log(`Performing IS-04 discovery from: ${registryUrl}`);
+  const queryApiUrl = registryUrl.endsWith('/') ? registryUrl : `${registryUrl}/`;
+  const sendersUrl = `${queryApiUrl}senders`;
+  const receiversUrl = `${queryApiUrl}receivers`;
 
-  discoveredResources.nodes = await fetchFromRegistry('nodes', registryUrl);
-  discoveredResources.devices = await fetchFromRegistry('devices', registryUrl);
-  discoveredResources.sources = await fetchFromRegistry('sources', registryUrl);
-  discoveredResources.flows = await fetchFromRegistry('flows', registryUrl);
-  discoveredResources.senders = await fetchFromRegistry('senders', registryUrl);
-  discoveredResources.receivers = await fetchFromRegistry('receivers', registryUrl);
+  try {
+    // Fetch all Senders with pagination
+    const senders = await fetchPaginatedResources(sendersUrl);
+    discoveredResources.senders = senders;
 
-  console.log('IS-04 Discovery complete for:', registryUrl);
-  // TODO: Implement WebSocket subscription for real-time updates (would also need to handle registryUrl changes)
-  subscribeToRegistryUpdates(registryUrl);
+    // Fetch all Receivers with pagination
+    const receivers = await fetchPaginatedResources(receiversUrl);
+    discoveredResources.receivers = receivers;
+
+    console.log(`Discovered ${discoveredResources.senders.length} senders and ${discoveredResources.receivers.length} receivers.`);
+
+    // Attempt to subscribe to IS-04 Query API WebSocket
+    subscribeToRegistryUpdates(registryUrl);
+
+  } catch (error) {
+    console.error('Error performing IS-04 discovery:', error.message);
+    if (error.response) {
+      console.error('Error details:', error.response.status, error.response.data);
+      // Notify frontend about the error
+      wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(JSON.stringify({
+            type: 'nmos_connection_status',
+            status: 'error',
+            message: `Failed to discover resources from Registry: ${error.response.statusText}`
+          }));
+        }
+      });
+    } else {
+       wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(JSON.stringify({
+            type: 'nmos_connection_status',
+            status: 'error',
+            message: `Failed to discover resources from Registry: ${error.message}`
+          }));
+        }
+      });
+    }
+  }
 }
 
 // --- IS-04 WebSocket Subscription ---
