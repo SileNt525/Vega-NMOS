@@ -720,72 +720,9 @@ function handleDataGrain(grain) {
     });
   }
 }
-      const resourcePath = change.path;
-      const resourceType = resourcePath.split('/')[1]; // e.g., 'nodes', 'devices'
-      const resourceId = resourcePath.split('/')[2]; // e.g., '123e4567...' 
 
-      if (!resourceType || !resourceId) {
-        console.warn('Received malformed data grain path:', resourcePath);
-        return;
-      }
+// 处理数据粒度变化的函数
 
-      // Update discoveredResources based on change type (add, remove, modify, sync)
-      if (change.post && !change.pre) { // Add
-        console.log(`Resource added: ${resourceType}/${resourceId}`);
-        // Add the new resource to the appropriate array in discoveredResources
-        if (discoveredResources[resourceType]) {
-          discoveredResources[resourceType].push(change.post);
-        } else {
-           console.warn(`Unknown resource type in data grain: ${resourceType}`);
-        }
-      } else if (!change.post && change.pre) { // Remove
-        console.log(`Resource removed: ${resourceType}/${resourceId}`);
-        // Remove the resource from the appropriate array in discoveredResources
-        if (discoveredResources[resourceType]) {
-          discoveredResources[resourceType] = discoveredResources[resourceType].filter(res => res.id !== resourceId);
-        } else {
-           console.warn(`Unknown resource type in data grain: ${resourceType}`);
-        }
-      } else if (change.post && change.pre) { // Modify or Sync
-         // Check if it's a sync event (pre and post are the same content)
-         const isSync = JSON.stringify(change.pre) === JSON.stringify(change.post);
-         if (isSync) {
-            console.log(`Resource sync: ${resourceType}/${resourceId}`);
-            // For sync, we might replace the existing resource or ensure it's present
-            if (discoveredResources[resourceType]) {
-               const index = discoveredResources[resourceType].findIndex(res => res.id === resourceId);
-               if (index !== -1) {
-                  discoveredResources[resourceType][index] = change.post;
-               } else {
-                  // If not found during sync, add it
-                  discoveredResources[resourceType].push(change.post);
-               }
-            } else {
-               console.warn(`Unknown resource type in data grain for sync: ${resourceType}`);
-            }
-         } else { // Modify
-            console.log(`Resource modified: ${resourceType}/${resourceId}`);
-            // Find and update the resource in the appropriate array
-            if (discoveredResources[resourceType]) {
-              const index = discoveredResources[resourceType].findIndex(res => res.id === resourceId);
-              if (index !== -1) {
-                discoveredResources[resourceType][index] = change.post;
-              } else {
-                 console.warn(`Modified resource not found in discoveredResources: ${resourceType}/${resourceId}`);
-                 // If modified resource is not found, add it (might happen if initial discovery missed it)
-                 discoveredResources[resourceType].push(change.post);
-              }
-            } else {
-               console.warn(`Unknown resource type in data grain for modify: ${resourceType}`);
-            }
-         }
-      }
-      // Notify frontend about the resource change via WebSocket
-      wss.clients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify({ type: 'nmos_resource_update', data: { resourceType, resourceId, change } }));
-        }
-      });
 
 
 // API endpoint for frontend to get discovered resources
