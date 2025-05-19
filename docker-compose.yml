@@ -8,7 +8,6 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - ./backend:/usr/src/app
       - /usr/src/app/node_modules # 保留容器内的node_modules
     environment:
       - NODE_ENV=development

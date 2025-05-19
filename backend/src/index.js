@@ -813,6 +813,66 @@ async function initializeIS05ConnectionManager() {
     });
   });
 
+  // 处理 IS-05 连接请求 (连接或断开)
+  app.post('/api/is05/connections', async (req, res) => {
+    const { senderId, receiverId } = req.body;
+
+    if (!receiverId) {
+      return res.status(400).json({ message: '接收端ID是必需的。' });
+    }
+
+    // 查找目标接收端
+    const receiver = discoveredResources.receivers.find(r => r.id === receiverId);
+    if (!receiver) {
+      return res.status(404).json({ message: `未找到接收端 ${receiverId}` });
+    }
+
+    // 查找接收端设备的控制端点
+    const receiverDevice = discoveredResources.devices.find(d => d.id === receiver.device_id);
+    if (!receiverDevice || !receiverDevice.controls || receiverDevice.controls.length === 0) {
+      return res.status(404).json({ message: `未找到接收端设备或其控制端点 ${receiver.device_id}` });
+    }
+
+    const connectionApiBaseUrl = receiverDevice.controls.find(c =>
+      c.type === "urn:x-nmos:control:connection/v1.1" || c.type === "urn:x-nmos:control:connection/v1.0"
+    )?.href;
+
+    if (!connectionApiBaseUrl) {
+      return res.status(404).json({ message: `未找到接收端设备 ${receiver.device_id} 的 IS-05 连接控制端点` });
+    }
+
+    const stagedUrl = `${connectionApiBaseUrl.replace(/\/?$/, '')}/receivers/${receiverId}/staged`;
+
+    // 构建 PATCH 请求体
+    const patchPayload = {
+      sender_id: senderId || null, // senderId 为 null 表示断开连接
+      activation: {
+        mode: 'activate_immediate'
+      }
+    };
+
+    console.log(`向接收端 ${receiverId} 的 staged 端点发送 PATCH 请求: ${stagedUrl}，负载:`, patchPayload);
+
+    try {
+      const response = await axios.patch(stagedUrl, patchPayload);
+      console.log(`PATCH 请求成功，状态码: ${response.status}`);
+
+      // 更新本地缓存状态 (可选，可以依赖 IS-04 WebSocket 更新)
+      // For simplicity, we'll rely on IS-04 updates for now.
+      // A more robust implementation might update cache immediately and then verify via IS-04.
+
+      res.json({ message: '连接请求已发送', status: response.status, data: response.data });
+    } catch (error) {
+      console.error(`向接收端 ${receiverId} 发送 PATCH 请求失败:`, error.message);
+      if (error.response) {
+        console.error('错误详情:', error.response.status, error.response.data);
+        return res.status(error.response.status).json({ message: '连接请求失败', error: error.response.data });
+      } else {
+        return res.status(500).json({ message: '连接请求失败', error: error.message });
+      }
+    }
+  });
+
   // 获取特定接收端的连接状态
   app.get('/api/is05/connections/:receiverId', async (req, res) => {
     const { receiverId } = req.params;
