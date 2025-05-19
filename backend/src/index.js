@@ -902,34 +902,64 @@ async function initializeIS05ConnectionManager() {
 
     const targetUrl = `${connectionApiBaseUrl.replace(/\/?$/, '')}/receivers/${receiverId}/staged`;
     
+    console.log('Sender resource:', JSON.stringify(sender));
+    console.log('Receiver resource:', JSON.stringify(receiver));
+
+    // 查找与发送端关联的设备以获取其API端点
+    const senderDevice = discoveredResources.devices.find(d => d.id === sender.device_id);
+    if (!senderDevice || !senderDevice.controls || senderDevice.controls.length === 0) {
+        return res.status(500).json({ message: `未找到发送端设备 ${sender.device_id} 的控制端点。` });
+    }
+
+    // 查找合适的IS-05控制端点 for Sender
+    const senderConnectionApiBaseUrl = senderDevice.controls.find(c =>
+      c.type === "urn:x-nmos:control:sr-ctrl/v1.1" || c.type === "urn:x-nmos:control:sr-ctrl/v1.0"
+    )?.href;
+
+    if(!senderConnectionApiBaseUrl){
+        console.error('未找到发送端设备的合适IS-05控制端点:', senderDevice);
+        return res.status(500).json({ message: `未找到发送端设备 ${sender.device_id} 的合适IS-05控制端点。控制端点: ${JSON.stringify(senderDevice.controls)}` });
+    }
+
+    // 尝试从发送端获取transportfile
+    const senderTransportFileUrl = `${senderConnectionApiBaseUrl.replace(/\/?$/, '')}/senders/${senderId}/transportfile`;
+    let transportFile = null;
+    try {
+        console.log(`尝试从发送端 ${senderId} 获取transportfile: ${senderTransportFileUrl}`);
+        const tfResponse = await axios.get(senderTransportFileUrl, { timeout: 3000 });
+        if (tfResponse.data && tfResponse.status === 200) {
+            transportFile = {
+                data: tfResponse.data, // Assuming data is the file content (e.g., SDP string)
+                type: tfResponse.headers['content-type'] || 'application/sdp' // Use Content-Type header or default to sdp
+            };
+            console.log(`成功获取发送端 ${senderId} 的transportfile。`);
+        } else {
+             console.warn(`从发送端 ${senderId} 获取transportfile失败，状态码: ${tfResponse.status}`);
+        }
+    } catch (error) {
+        console.error(`从发送端 ${senderId} 获取transportfile时出错:`, error.message);
+        // 如果获取transportfile失败，可以根据需要决定是否继续或返回错误
+        // 目前选择继续，但payload中将不包含transport_file
+    }
+
     // 准备IS-05 PATCH请求的负载
-    // 准备IS-05 PATCH请求的负载
-    // 根据IS-05规范，transport_params的内容取决于接收端支持的传输类型
-    // 假设这里处理的是RTP传输，需要提供必要的参数
     const payload = {
       sender_id: senderId,
       master_enable: true, // 立即激活连接
       activation: {
         mode: "activate_immediate" // 立即激活模式
       },
-      // transport_params 结构需要根据实际的Sender和Receiver能力以及NMOS规范来构建
-      // 这里的示例是基于常见的RTP流，可能需要根据实际情况调整
-      transport_params: [
-        {
-          destination_ip: "239.1.1.1", // 示例IP，需要根据实际Sender/Receiver协商或配置
-          destination_port: 5004, // 示例端口，需要根据实际Sender/Receiver协商或配置
-          rtp_enabled: true,
-          // source_ip 和 source_port 通常由Sender提供，或者由Receiver根据网络配置确定
-          // 如果Sender资源中没有这些信息，可能需要其他方式获取或配置
-          source_ip: sender.transport_params?.source_ip || "0.0.0.0", // 尝试从Sender获取，否则使用默认
-          source_port: sender.transport_params?.source_port || 0 // 尝试从Sender获取，否则使用默认
-          // 其他可能的参数如 fec_enabled, session_description 等，根据需要添加
-        }
-      ]
+      // 根据IS-05规范，优先使用transport_file
+      ...(transportFile && { transport_file: transportFile }),
+      // 如果没有transport_file，可以尝试使用transport_params，但这通常需要Receiver支持
+      // 这里的示例不再硬编码transport_params，依赖于transport_file或Receiver的默认行为
+      transport_params: [] // 清空硬编码的transport_params示例
     };
 
-    console.log(`发送IS-05 PATCH请求到 ${targetUrl}，负载:`, JSON.stringify(payload));
+    // 移除之前硬编码的transport_params验证，因为现在依赖transport_file或Receiver自身处理
+    // 如果需要更严格的验证，应根据获取到的transport_file内容进行解析和验证
 
+    console.log(`发送IS-05 PATCH请求到 ${targetUrl}，负载:`, JSON.stringify(payload));
     try {
       // 发送PATCH请求到接收端的staged端点
       const patchResponse = await axios.patch(targetUrl, payload, {
