@@ -645,9 +645,9 @@ function handleDataGrain(grain) {
           }
 
           const resourcePath = changeData.path;
-          const pathParts = resourcePath.split('/');
-          const resourceType = pathParts[1];
-          const resourceId = pathParts[2];
+      const pathParts = resourcePath.split('/');
+      const resourceType = pathParts[1];
+      const resourceId = pathParts[2];
           
           if (!resourceType || !resourceId) {
             console.warn('Received malformed data grain path:', resourcePath);
