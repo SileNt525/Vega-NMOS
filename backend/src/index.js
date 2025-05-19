@@ -291,23 +291,30 @@ async function fetchFromRegistry(resourceType, registryUrlToUse) {
 async function fetchPaginatedResources(startUrl) {
   let allResources = [];
   let currentUrl = startUrl;
-  console.log(`[fetchPaginatedResources] Starting pagination fetch from: ${startUrl}`); // Added log
+  console.log(`[fetchPaginatedResources] Starting pagination fetch from: ${startUrl}`);
 
   while (currentUrl) {
-    console.log(`[fetchPaginatedResources] Fetching page from: ${currentUrl}`); // Added log
+    console.log(`[fetchPaginatedResources] Fetching page from: ${currentUrl}`);
     try {
       const response = await axios.get(currentUrl);
-      console.log(`[fetchPaginatedResources] Received response status: ${response.status}, Link header present: ${!!response.headers.link}`); // Added log
-      allResources = allResources.concat(response.data);
-      const nextLink = getNextLink(response.headers.link);
-      currentUrl = nextLink;
+      console.log(`[fetchPaginatedResources] Received response status: ${response.status}, Link header present: ${!!response.headers.link}`);
+      // Check if the response data is empty. If so, we've reached the last page.
+      if (!response.data || response.data.length === 0) {
+        console.log('[fetchPaginatedResources] Received empty data, assuming last page.');
+        currentUrl = null; // Terminate the loop
+      } else {
+        allResources = allResources.concat(response.data);
+        const nextLink = getNextLink(response.headers.link);
+        // If getNextLink returns null, the loop should terminate
+        currentUrl = nextLink;
+      }
     } catch (error) {
       console.error(`Error fetching paginated resources from ${currentUrl}:`, error.message);
       if (error.response) {
         console.error('Error details:', error.response.status, error.response.data);
       }
       // Stop fetching on error
-      currentUrl = null;
+      currentUrl = null; // Ensure loop terminates on error
     }
   }
   return allResources;
@@ -315,7 +322,7 @@ async function fetchPaginatedResources(startUrl) {
 
 // Helper function to parse Link header and find next page URL
 function getNextLink(linkHeader) {
-  console.log(`[getNextLink] Processing Link header: ${linkHeader}`); // Added log
+  console.log(`[getNextLink] Processing Link header: ${linkHeader}`);
   if (!linkHeader) return null;
   const links = linkHeader.split(',');
   for (const link of links) {
@@ -327,13 +334,15 @@ function getNextLink(linkHeader) {
     if (relPart === 'rel="next"') {
       const urlMatch = urlPart.match(/^<(.*)>$/);
       if (urlMatch && urlMatch[1]) {
-        console.log(`[getNextLink] Found next link: ${urlMatch[1]}`); // Added log
+        console.log(`[getNextLink] Found next link: ${urlMatch[1]}`);
+        // Ensure the returned URL is absolute if necessary, or handle relative URLs
+        // For now, assuming the registry provides absolute URLs in the Link header
         return urlMatch[1];
       }
     }
   }
-  console.log(`[getNextLink] No next link found.`); // Added log
-  return null;
+  console.log(`[getNextLink] No next link found.`);
+  return null; // Explicitly return null if no 'rel="next"' link is found
 }
 
 // Function to perform IS-04 discovery
