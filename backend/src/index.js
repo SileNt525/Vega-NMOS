@@ -933,7 +933,6 @@ async function initializeIS05ConnectionManager() {
                 type: tfResponse.headers['content-type'] || 'application/sdp' // Use Content-Type header or default to sdp
             };
             console.log(`成功获取发送端 ${senderId} 的transportfile。`);
-            console.log('获取到的transportfile内容:', transportFile);
         } else {
              console.warn(`从发送端 ${senderId} 获取transportfile失败，状态码: ${tfResponse.status}`);
         }
@@ -960,7 +959,7 @@ async function initializeIS05ConnectionManager() {
     // 移除之前硬编码的transport_params验证，因为现在依赖transport_file或Receiver自身处理
     // 如果需要更严格的验证，应根据获取到的transport_file内容进行解析和验证
 
-    console.log(`发送IS-05 PATCH请求到 ${targetUrl}，负载:`, JSON.stringify(payload, null, 2));
+    console.log(`发送IS-05 PATCH请求到 ${targetUrl}，负载:`, JSON.stringify(payload));
     try {
       // 发送PATCH请求到接收端的staged端点
       const patchResponse = await axios.patch(targetUrl, payload, {
