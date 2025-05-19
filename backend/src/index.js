@@ -148,6 +148,13 @@ async function registerControllerToRegistry() {
         console.log('所有资源注册成功');
         // 启动心跳
         heartbeatInterval = setInterval(sendHeartbeats, NMOS_HEARTBEAT_INTERVAL_MS);
+        
+        // 启动状态验证定时器
+        const stateVerificationInterval = setInterval(() => {
+          Object.keys(activeConnections).forEach(receiverId => {
+            verifyConnectionState(receiverId);
+          });
+        }, 10000); // 每10秒验证一次连接状态
         return true;
       }
 
@@ -610,8 +617,104 @@ function handleSubscriptionFailure(registryUrl, errorMessage) {
 
 // Function to handle incoming Data Grains
 function handleDataGrain(grain) {
-  if (grain.grain_type === 'event' && grain.data && Array.isArray(grain.data)) {
-    grain.data.forEach(change => {
+  try {
+    if (!grain || !grain.grain || !grain.grain.data) {
+      console.error('Invalid data grain format:', grain);
+      return;
+    }
+    
+    const { topic, data } = grain.grain;
+    
+    // 根据topic类型处理不同资源变更
+    switch (topic) {
+      case '/nodes/':
+      case '/devices/':
+      case '/sources/':
+      case '/flows/':
+      case '/senders/':
+      case '/receivers/':
+        data.forEach(change => {
+          const resourcePath = change.path;
+          const resourceType = resourcePath.split('/')[1];
+          const resourceId = resourcePath.split('/')[2];
+          
+          if (!resourceType || !resourceId) {
+            console.warn('Received malformed data grain path:', resourcePath);
+            return;
+          }
+          
+          // 处理不同类型的变更
+          if (change.post && !change.pre) { // 新增资源
+            console.log(`Resource added: ${resourceType}/${resourceId}`);
+            if (discoveredResources[resourceType]) {
+              discoveredResources[resourceType].push(change.post);
+            }
+          } else if (!change.post && change.pre) { // 移除资源
+            console.log(`Resource removed: ${resourceType}/${resourceId}`);
+            if (discoveredResources[resourceType]) {
+              discoveredResources[resourceType] = discoveredResources[resourceType].filter(
+                res => res.id !== resourceId
+              );
+            }
+          } else if (change.post && change.pre) { // 修改或同步
+            const isSync = JSON.stringify(change.pre) === JSON.stringify(change.post);
+            if (isSync) {
+              console.log(`Resource sync: ${resourceType}/${resourceId}`);
+              if (discoveredResources[resourceType]) {
+                const index = discoveredResources[resourceType].findIndex(
+                  res => res.id === resourceId
+                );
+                if (index !== -1) {
+                  discoveredResources[resourceType][index] = change.post;
+                } else {
+                  discoveredResources[resourceType].push(change.post);
+                }
+              }
+            } else { // 修改
+              console.log(`Resource modified: ${resourceType}/${resourceId}`);
+              if (discoveredResources[resourceType]) {
+                const index = discoveredResources[resourceType].findIndex(
+                  res => res.id === resourceId
+                );
+                if (index !== -1) {
+                  discoveredResources[resourceType][index] = change.post;
+                } else {
+                  discoveredResources[resourceType].push(change.post);
+                }
+              }
+            }
+          }
+          
+          // 通知前端资源变更
+          wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+              client.send(JSON.stringify({
+                type: 'nmos_resource_update',
+                resourceType,
+                resourceId,
+                changeType: change.post && !change.pre ? 'added' : 
+                          !change.post && change.pre ? 'removed' : 'modified'
+              }));
+            }
+          });
+        });
+        break;
+        
+      default:
+        console.log(`Received unhandled resource type change: ${topic}`);
+    }
+  } catch (error) {
+    console.error('Error processing data grain:', error);
+    wss.clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify({
+          type: 'nmos_error',
+          message: 'Failed to process registry update',
+          details: error.message
+        }));
+      }
+    });
+  }}
       const resourcePath = change.path;
       const resourceType = resourcePath.split('/')[1]; // e.g., 'nodes', 'devices'
       const resourceId = resourcePath.split('/')[2]; // e.g., '123e4567...' 
@@ -678,9 +781,7 @@ function handleDataGrain(grain) {
           client.send(JSON.stringify({ type: 'nmos_resource_update', data: { resourceType, resourceId, change } }));
         }
       });
-    });
-  }
-}
+
 
 // API endpoint for frontend to get discovered resources
 app.post('/api/is04/discover', async (req, res) => {
@@ -865,9 +966,14 @@ async function initializeIS05ConnectionManager() {
       master_enable: true, // 立即激活连接
       activation: {
         mode: "activate_immediate" // 立即激活模式
+      },
+      transport_params: {
+        destination_ip: "239.1.1.1",
+        destination_port: 5004,
+        rtp_enabled: true,
+        source_ip: sender.transport_params?.source_ip || "0.0.0.0",
+        source_port: sender.transport_params?.source_port || 0
       }
-      // 对于IS-05 v1.1+，接收端会根据sender_id自动确定transport_params
-      // 对于特定需求，可能需要根据sender.transport添加transport_params
     };
 
     console.log(`发送IS-05 PATCH请求到 ${targetUrl}，负载:`, JSON.stringify(payload));
@@ -1000,9 +1106,3 @@ async function initializeIS05ConnectionManager() {
     }
   });
 }
-
-// Middleware for parsing JSON bodies (important for POST requests like IS-05)
-// Remove duplicate express.json() middleware
-
-// Start core services
-// performIS04Discovery(currentRegistryUrl); // Initial discovery is now called at the end of its definition
