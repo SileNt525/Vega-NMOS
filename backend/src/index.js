@@ -633,8 +633,8 @@ function handleDataGrain(grain) {
       case '/flows/':
       case '/senders/':
       case '/receivers/':
-        data.forEach(change => {
-          const resourcePath = change.path;
+        data.forEach(changeData => {
+          const resourcePath = changeData.path;
           const resourceType = resourcePath.split('/')[1];
           const resourceId = resourcePath.split('/')[2];
           
