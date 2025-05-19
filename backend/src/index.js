@@ -644,20 +644,20 @@ function handleDataGrain(grain) {
           }
           
           // 处理不同类型的变更
-          if (change.post && !change.pre) { // 新增资源
+          if (changeData.post && !changeData.pre) { // 新增资源
             console.log(`Resource added: ${resourceType}/${resourceId}`);
             if (discoveredResources[resourceType]) {
-              discoveredResources[resourceType].push(change.post);
+              discoveredResources[resourceType].push(changeData.post);
             }
-          } else if (!change.post && change.pre) { // 移除资源
+          } else if (!changeData.post && changeData.pre) { // 移除资源
             console.log(`Resource removed: ${resourceType}/${resourceId}`);
             if (discoveredResources[resourceType]) {
               discoveredResources[resourceType] = discoveredResources[resourceType].filter(
                 res => res.id !== resourceId
               );
             }
-          } else if (change.post && change.pre) { // 修改或同步
-            const isSync = JSON.stringify(change.pre) === JSON.stringify(change.post);
+          } else if (changeData.post && changeData.pre) { // 修改或同步
+            const isSync = JSON.stringify(changeData.pre) === JSON.stringify(changeData.post);
             if (isSync) {
               console.log(`Resource sync: ${resourceType}/${resourceId}`);
               if (discoveredResources[resourceType]) {
@@ -665,9 +665,9 @@ function handleDataGrain(grain) {
                   res => res.id === resourceId
                 );
                 if (index !== -1) {
-                  discoveredResources[resourceType][index] = change.post;
+                  discoveredResources[resourceType][index] = changeData.post;
                 } else {
-                  discoveredResources[resourceType].push(change.post);
+                  discoveredResources[resourceType].push(changeData.post);
                 }
               }
             } else { // 修改
@@ -677,9 +677,9 @@ function handleDataGrain(grain) {
                   res => res.id === resourceId
                 );
                 if (index !== -1) {
-                  discoveredResources[resourceType][index] = change.post;
+                  discoveredResources[resourceType][index] = changeData.post;
                 } else {
-                  discoveredResources[resourceType].push(change.post);
+                  discoveredResources[resourceType].push(changeData.post);
                 }
               }
             }
@@ -692,8 +692,8 @@ function handleDataGrain(grain) {
                 type: 'nmos_resource_update',
                 resourceType,
                 resourceId,
-                changeType: change.post && !change.pre ? 'added' : 
-                          !change.post && change.pre ? 'removed' : 'modified'
+                changeType: changeData.post && !changeData.pre ? 'added' : 
+                          !changeData.post && changeData.pre ? 'removed' : 'modified'
               }));
             }
           });
