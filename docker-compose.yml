@@ -21,7 +21,7 @@ services:
       - ./frontend:/usr/src/app
     depends_on:
       - backend
-    command: npm install && npm run dev # 增加日志级别以便诊断问题
+    command: sh -c "npm install && npm run dev -- --logLevel=verbose" # 增加日志级别以便诊断问题
 
 networks:
   default:
