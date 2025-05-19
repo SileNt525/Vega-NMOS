@@ -21,7 +21,7 @@ services:
       - ./frontend:/usr/src/app
     depends_on:
       - backend
-    command: sh start.sh # 使用启动脚本确保依赖项安装并启动开发服务器
+    command: npm run dev # 直接使用npm run dev命令启动开发服务器
 
 networks:
   default:
