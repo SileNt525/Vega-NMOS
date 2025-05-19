@@ -948,7 +948,6 @@ async function initializeIS05ConnectionManager() {
                 type: tfResponse.headers['content-type'] || 'application/sdp'
             };
             console.log(`成功获取发送端 ${senderId} 的transportfile。`);
-            console.log('获取到的transportfile内容:', transportFile);
         } else {
              console.warn(`从发送端 ${senderId} 获取transportfile失败，状态码: ${tfResponse.status}`);
         }
