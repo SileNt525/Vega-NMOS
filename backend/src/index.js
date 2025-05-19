@@ -220,51 +220,158 @@ async function createSubscription(registryUrl) {
   }
 }
 
+// 增强的IS-04 WebSocket订阅功能，包含更完善的错误处理和重连逻辑
+let wsReconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 10;
+const INITIAL_RECONNECT_DELAY = 1000; // 1秒
+let reconnectDelay = INITIAL_RECONNECT_DELAY;
+
 function subscribeToRegistryUpdates(registryUrl) {
-  // Close existing connection if any
+  // 关闭现有连接（如果有）
   if (registryWebSocket) {
-    registryWebSocket.close();
+    try {
+      if (registryWebSocket.readyState === WebSocket.OPEN || 
+          registryWebSocket.readyState === WebSocket.CONNECTING) {
+        registryWebSocket.close();
+      }
+    } catch (err) {
+      console.error('Error closing existing WebSocket:', err);
+    }
+    registryWebSocket = null;
   }
+
+  console.log(`Attempting to subscribe to IS-04 updates from ${registryUrl}, attempt #${wsReconnectAttempts + 1}`);
 
   createSubscription(registryUrl)
     .then(subscription => {
       if (subscription && subscription.ws_href) {
-        const wsUrl = subscription.ws_href.replace(/^http/, 'ws'); // Convert http/https to ws/wss
+        const wsUrl = subscription.ws_href.replace(/^http/, 'ws'); // 将http/https转换为ws/wss
         console.log(`Connecting to IS-04 WebSocket: ${wsUrl}`);
-        registryWebSocket = new WebSocket(wsUrl);
+        
+        try {
+          registryWebSocket = new WebSocket(wsUrl);
+          
+          registryWebSocket.onopen = () => {
+            console.log('IS-04 WebSocket connected successfully.');
+            // 连接成功后重置重连计数器和延迟
+            wsReconnectAttempts = 0;
+            reconnectDelay = INITIAL_RECONNECT_DELAY;
+            
+            // 通知前端WebSocket已连接
+            wss.clients.forEach(client => {
+              if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({ 
+                  type: 'nmos_connection_status', 
+                  status: 'connected',
+                  message: 'IS-04 WebSocket subscription active'
+                }));
+              }
+            });
+          };
 
-        registryWebSocket.onopen = () => {
-          console.log('IS-04 WebSocket connected.');
-        };
+          registryWebSocket.onmessage = (event) => {
+            try {
+              const grain = JSON.parse(event.data);
+              handleDataGrain(grain);
+            } catch (error) {
+              console.error('Error parsing IS-04 WebSocket message:', error);
+            }
+          };
 
-        registryWebSocket.onmessage = (event) => {
-          // console.log('Received IS-04 WebSocket message:', event.data); // Log every message can be noisy
-          try {
-            const grain = JSON.parse(event.data);
-            handleDataGrain(grain);
-          } catch (error) {
-            console.error('Error parsing IS-04 WebSocket message:', error);
-          }
-        };
+          registryWebSocket.onerror = (error) => {
+            console.error('IS-04 WebSocket error:', error);
+            // 通知前端发生错误
+            wss.clients.forEach(client => {
+              if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({ 
+                  type: 'nmos_connection_status', 
+                  status: 'error',
+                  message: 'IS-04 WebSocket connection error'
+                }));
+              }
+            });
+          };
 
-        registryWebSocket.onerror = (error) => {
-          console.error('IS-04 WebSocket error:', error.message);
-        };
-
-        registryWebSocket.onclose = (event) => {
-          console.log(`IS-04 WebSocket closed: Code=${event.code}, Reason=${event.reason}`);
-          // Attempt to reconnect after a delay
-          setTimeout(() => subscribeToRegistryUpdates(registryUrl), 5000); // Retry after 5 seconds
-        };
+          registryWebSocket.onclose = (event) => {
+            console.log(`IS-04 WebSocket closed: Code=${event.code}, Reason=${event.reason}`);
+            
+            // 通知前端连接已关闭
+            wss.clients.forEach(client => {
+              if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({ 
+                  type: 'nmos_connection_status', 
+                  status: 'disconnected',
+                  message: `IS-04 WebSocket disconnected: ${event.reason || 'Connection closed'}`
+                }));
+              }
+            });
+            
+            // 实现指数退避重连策略
+            if (wsReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+              wsReconnectAttempts++;
+              reconnectDelay = Math.min(reconnectDelay * 1.5, 30000); // 最大30秒延迟
+              console.log(`Scheduling WebSocket reconnection in ${reconnectDelay}ms (attempt ${wsReconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
+              setTimeout(() => subscribeToRegistryUpdates(registryUrl), reconnectDelay);
+            } else {
+              console.error(`Maximum WebSocket reconnection attempts (${MAX_RECONNECT_ATTEMPTS}) reached. Giving up.`);
+              // 通知前端已达到最大重连次数
+              wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                  client.send(JSON.stringify({ 
+                    type: 'nmos_connection_status', 
+                    status: 'failed',
+                    message: 'IS-04 WebSocket connection failed after maximum reconnection attempts'
+                  }));
+                }
+              });
+            }
+          };
+        } catch (error) {
+          console.error('Error creating WebSocket connection:', error);
+          handleSubscriptionFailure(registryUrl, 'Error creating WebSocket connection');
+        }
       } else {
-        console.error('Failed to create subscription or get WebSocket URL. Retrying in 5 seconds...');
-        setTimeout(() => subscribeToRegistryUpdates(registryUrl), 5000); // Retry subscription creation
+        console.error('Failed to create subscription or get WebSocket URL.');
+        handleSubscriptionFailure(registryUrl, 'Failed to create subscription or get WebSocket URL');
       }
     })
     .catch(error => {
       console.error('Error in subscription process:', error);
-      setTimeout(() => subscribeToRegistryUpdates(registryUrl), 5000); // Retry subscription creation on promise rejection
+      handleSubscriptionFailure(registryUrl, 'Error in subscription process');
     });
+}
+
+function handleSubscriptionFailure(registryUrl, errorMessage) {
+  // 通知前端订阅失败
+  wss.clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify({ 
+        type: 'nmos_connection_status', 
+        status: 'error',
+        message: errorMessage
+      }));
+    }
+  });
+  
+  // 实现指数退避重连策略
+  if (wsReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+    wsReconnectAttempts++;
+    reconnectDelay = Math.min(reconnectDelay * 1.5, 30000); // 最大30秒延迟
+    console.log(`Scheduling subscription retry in ${reconnectDelay}ms (attempt ${wsReconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
+    setTimeout(() => subscribeToRegistryUpdates(registryUrl), reconnectDelay);
+  } else {
+    console.error(`Maximum subscription retry attempts (${MAX_RECONNECT_ATTEMPTS}) reached. Giving up.`);
+    // 通知前端已达到最大重试次数
+    wss.clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify({ 
+          type: 'nmos_connection_status', 
+          status: 'failed',
+          message: 'IS-04 subscription failed after maximum retry attempts'
+        }));
+      }
+    });
+  }
 }
 
 // Function to handle incoming Data Grains
@@ -401,102 +508,214 @@ app.post('/api/nmos/stop-registry', (req, res) => {
 });
 
 // --- IS-05 Connection Management --- 
+// 存储活动连接的映射表，用于跟踪当前连接状态
+let activeConnections = {}; // 格式: { receiverId: { senderId, timestamp, status } }
+
 async function initializeIS05ConnectionManager() {
   console.log('Initializing IS-05 Connection Manager...');
-  // TODO: Implement API endpoints for IS-05 operations
-  // e.g., POST /connect, POST /disconnect
-  // These endpoints will interact with NMOS Senders and Receivers
+  
+  // 获取连接状态的API端点
+  app.get('/api/is05/connections', (req, res) => {
+    res.json({
+      connections: activeConnections,
+      timestamp: Date.now()
+    });
+  });
+
+  // 获取特定接收端的连接状态
+  app.get('/api/is05/connections/:receiverId', async (req, res) => {
+    const { receiverId } = req.params;
+    
+    if (!receiverId) {
+      return res.status(400).json({ message: '接收端ID是必需的。' });
+    }
+    
+    // 检查本地缓存中的连接状态
+    const cachedConnection = activeConnections[receiverId];
+    
+    // 如果接收端存在于我们的系统中，尝试从设备获取实际状态
+    const receiver = discoveredResources.receivers.find(r => r.id === receiverId);
+    if (receiver) {
+      try {
+        // 获取接收端设备的控制端点
+        const receiverDevice = discoveredResources.devices.find(d => d.id === receiver.device_id);
+        if (receiverDevice && receiverDevice.controls && receiverDevice.controls.length > 0) {
+          const connectionApiBaseUrl = receiverDevice.controls.find(c => 
+            c.type === "urn:x-nmos:control:sr-ctrl/v1.1" || c.type === "urn:x-nmos:control:sr-ctrl/v1.0"
+          )?.href;
+          
+          if (connectionApiBaseUrl) {
+            // 查询接收端的当前活动连接状态
+            const activeUrl = `${connectionApiBaseUrl.replace(/\/?$/, '')}/receivers/${receiverId}/active`;
+            const response = await axios.get(activeUrl, { timeout: 3000 });
+            
+            if (response.data && response.status === 200) {
+              // 更新本地缓存
+              const currentSenderId = response.data.sender_id || null;
+              if (currentSenderId) {
+                activeConnections[receiverId] = {
+                  senderId: currentSenderId,
+                  timestamp: Date.now(),
+                  status: 'active',
+                  transportParams: response.data.transport_params || []
+                };
+              } else if (activeConnections[receiverId]) {
+                // 如果设备报告没有连接，但我们的缓存中有，则更新状态
+                delete activeConnections[receiverId];
+              }
+              
+              return res.json({
+                receiverId,
+                connection: activeConnections[receiverId] || { status: 'disconnected' },
+                deviceStatus: response.data
+              });
+            }
+          }
+        }
+      } catch (error) {
+        console.error(`获取接收端 ${receiverId} 连接状态时出错:`, error.message);
+        // 如果查询失败，返回缓存的状态（如果有）
+      }
+    }
+    
+    // 如果无法从设备获取状态或发生错误，返回缓存的状态
+    return res.json({
+      receiverId,
+      connection: cachedConnection || { status: 'unknown' },
+      note: '这是缓存的状态，可能与设备实际状态不同'
+    });
+  });
+
+  // IS-05 连接端点 - 建立发送端到接收端的连接
   app.post('/api/is05/connect', async (req, res) => {
     const { senderId, receiverId } = req.body;
-    console.log(`Attempting IS-05 connection: Sender ${senderId} to Receiver ${receiverId}`);
+    console.log(`尝试IS-05连接: 发送端 ${senderId} 到接收端 ${receiverId}`);
 
     if (!senderId || !receiverId) {
-      return res.status(400).json({ message: 'senderId and receiverId are required.' });
+      return res.status(400).json({ message: '发送端ID和接收端ID都是必需的。' });
     }
 
     const receiver = discoveredResources.receivers.find(r => r.id === receiverId);
     const sender = discoveredResources.senders.find(s => s.id === senderId);
 
     if (!receiver) {
-      return res.status(404).json({ message: `Receiver with ID ${receiverId} not found.` });
+      return res.status(404).json({ message: `未找到ID为 ${receiverId} 的接收端。` });
     }
     if (!sender) {
-      return res.status(404).json({ message: `Sender with ID ${senderId} not found.` });
+      return res.status(404).json({ message: `未找到ID为 ${senderId} 的发送端。` });
     }
 
-    // Find the device associated with the receiver to get its API endpoint
+    // 查找与接收端关联的设备以获取其API端点
     const receiverDevice = discoveredResources.devices.find(d => d.id === receiver.device_id);
     if (!receiverDevice || !receiverDevice.controls || receiverDevice.controls.length === 0) {
-        return res.status(500).json({ message: `Control endpoint for receiver's device ${receiver.device_id} not found.` });
+        return res.status(500).json({ message: `未找到接收端设备 ${receiver.device_id} 的控制端点。` });
     }
-    // Assuming the first control URL is the correct one and it's for Connection API v1.1
-    // Example control URL: "http://[ip]:[port]/x-nmos/connection/v1.1"
-    const connectionApiBaseUrl = receiverDevice.controls.find(c => c.type === "urn:x-nmos:control:sr-ctrl/v1.1" || c.type === "urn:x-nmos:control:sr-ctrl/v1.0" )?.href;
+    
+    // 查找合适的IS-05控制端点
+    const connectionApiBaseUrl = receiverDevice.controls.find(c => 
+      c.type === "urn:x-nmos:control:sr-ctrl/v1.1" || c.type === "urn:x-nmos:control:sr-ctrl/v1.0"
+    )?.href;
+    
     if(!connectionApiBaseUrl){
-        console.error('Suitable IS-05 control endpoint not found for device:', receiverDevice);
-        return res.status(500).json({ message: `Suitable IS-05 control endpoint not found for device ${receiver.device_id}. Controls: ${JSON.stringify(receiverDevice.controls)}` });
+        console.error('未找到设备的合适IS-05控制端点:', receiverDevice);
+        return res.status(500).json({ 
+          message: `未找到设备 ${receiver.device_id} 的合适IS-05控制端点。控制端点: ${JSON.stringify(receiverDevice.controls)}` 
+        });
     }
 
     const targetUrl = `${connectionApiBaseUrl.replace(/\/?$/, '')}/receivers/${receiverId}/staged`;
     
+    // 准备IS-05 PATCH请求的负载
     const payload = {
       sender_id: senderId,
-      master_enable: true, // Activate the connection immediately
-      // transport_params: [] // IS-05 v1.1+ uses sender_id and receiver figures out params
-                           // For older versions or specific needs, transport_params might be needed based on sender.transport
+      master_enable: true, // 立即激活连接
+      activation: {
+        mode: "activate_immediate" // 立即激活模式
+      }
+      // 对于IS-05 v1.1+，接收端会根据sender_id自动确定transport_params
+      // 对于特定需求，可能需要根据sender.transport添加transport_params
     };
 
-    console.log(`Sending IS-05 PATCH to ${targetUrl} with payload:`, JSON.stringify(payload));
+    console.log(`发送IS-05 PATCH请求到 ${targetUrl}，负载:`, JSON.stringify(payload));
 
     try {
+      // 发送PATCH请求到接收端的staged端点
       const patchResponse = await axios.patch(targetUrl, payload, {
         headers: { 'Content-Type': 'application/json' },
-        // It's good practice to set a timeout for external API calls
-        timeout: 5000 // 5 seconds timeout
+        timeout: 5000 // 5秒超时
       });
       
-      console.log('IS-05 PATCH successful:', patchResponse.status, patchResponse.data);
-      // The response from the receiver (patchResponse.data) contains the new staged parameters.
-      // It's good practice to update our local 'discoveredResources.receivers' if the response indicates changes.
-      // For simplicity, we'll just return success here.
+      console.log('IS-05 PATCH成功:', patchResponse.status, patchResponse.data);
+      
+      // 更新本地连接状态缓存
+      activeConnections[receiverId] = {
+        senderId,
+        timestamp: Date.now(),
+        status: 'active',
+        transportParams: patchResponse.data.transport_params || []
+      };
+      
+      // 通知所有连接的WebSocket客户端连接状态变化
+      wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(JSON.stringify({
+            type: 'nmos_connection_update',
+            data: {
+              receiverId,
+              senderId,
+              action: 'connected',
+              timestamp: Date.now()
+            }
+          }));
+        }
+      });
+      
+      // 返回成功响应
       res.json({ 
-        message: `Successfully sent IS-05 connection request for Sender ${senderId} to Receiver ${receiverId}.`, 
-        receiverResponse: patchResponse.data 
+        message: `成功发送IS-05连接请求，将发送端 ${senderId} 连接到接收端 ${receiverId}。`, 
+        receiverResponse: patchResponse.data,
+        connection: activeConnections[receiverId]
       });
 
     } catch (error) {
-      console.error(`Error during IS-05 PATCH to ${targetUrl}:`, error.message);
+      console.error(`向 ${targetUrl} 发送IS-05 PATCH请求时出错:`, error.message);
+      
+      // 根据错误类型返回适当的错误响应
       if (error.response) {
-        console.error('Error details:', error.response.status, error.response.data);
+        console.error('错误详情:', error.response.status, error.response.data);
         res.status(error.response.status || 500).json({
-          message: `Failed to connect Sender ${senderId} to Receiver ${receiverId}. Receiver API error.`, 
+          message: `连接失败: 发送端 ${senderId} 到接收端 ${receiverId}。接收端API错误。`, 
           error: error.response.data
         });
       } else if (error.request) {
-        console.error('Error request:', error.request);
-        res.status(504).json({ message: `Failed to connect: No response from receiver at ${targetUrl}.` });
+        console.error('请求错误:', error.request);
+        res.status(504).json({ 
+          message: `连接失败: 接收端 ${targetUrl} 无响应。` 
+        });
       } else {
-        res.status(500).json({ message: 'Failed to connect: Internal server error while making PATCH request.' });
+        res.status(500).json({ 
+          message: '连接失败: 发送PATCH请求时发生内部服务器错误。' 
+        });
       }
     }
   });
 
-  // IS-05 Disconnect endpoint
+  // IS-05 断开连接端点
   app.post('/api/is05/disconnect', async (req, res) => {
     const { receiverId } = req.body;
-    console.log(`Attempting IS-05 disconnection for Receiver ${receiverId}`);
+    console.log(`尝试断开IS-05连接: 接收端 ${receiverId}`);
 
     if (!receiverId) {
-      return res.status(400).json({ message: 'receiverId is required.' });
+      return res.status(400).json({ message: '接收端ID是必需的。' });
     }
 
     const receiver = discoveredResources.receivers.find(r => r.id === receiverId);
 
     if (!receiver) {
-      return res.status(404).json({ message: `Receiver with ID ${receiverId} not found.` });
+      return res.status(404).json({ message: `未找到ID为 ${receiverId} 的接收端。` });
     }
 
-    // Find the device associated with the receiver to get its API endpoint
+    // 查找与接收端关联的设备以获取其API端点
     const receiverDevice = discoveredResources.devices.find(d => d.id === receiver.device_id);
     if (!receiverDevice || !receiverDevice.controls || receiverDevice.controls.length === 0) {
         return res.status(500).json({ message: `Control endpoint for receiver's device ${receiver.device_id} not found.` });
