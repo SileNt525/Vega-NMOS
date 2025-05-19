@@ -818,7 +818,7 @@ async function initializeIS05ConnectionManager() {
         const receiverDevice = discoveredResources.devices.find(d => d.id === receiver.device_id);
         if (receiverDevice && receiverDevice.controls && receiverDevice.controls.length > 0) {
           const connectionApiBaseUrl = receiverDevice.controls.find(c => 
-            c.type === "urn:x-nmos:control:sr-ctrl/v1.1" || c.type === "urn:x-nmos:control:sr-ctrl/v1.0"
+            c.type === "urn:x-nmos:control:connection/v1.1" || c.type === "urn:x-nmos:control:connection/v1.0"
           )?.href;
           
           if (connectionApiBaseUrl) {
@@ -885,18 +885,19 @@ async function initializeIS05ConnectionManager() {
     // 查找与接收端关联的设备以获取其API端点
     const receiverDevice = discoveredResources.devices.find(d => d.id === receiver.device_id);
     if (!receiverDevice || !receiverDevice.controls || receiverDevice.controls.length === 0) {
+        console.error(`未找到接收端设备 ${receiver.device_id} 的控制端点。设备信息:`, receiverDevice);
         return res.status(500).json({ message: `未找到接收端设备 ${receiver.device_id} 的控制端点。` });
     }
     
     // 查找合适的IS-05控制端点
-    const connectionApiBaseUrl = receiverDevice.controls.find(c => 
-      c.type === "urn:x-nmos:control:sr-ctrl/v1.1" || c.type === "urn:x-nmos:control:sr-ctrl/v1.0"
+    const connectionApiBaseUrl = receiverDevice.controls.find(c =>
+      c.type === "urn:x-nmos:control:connection/v1.1" || c.type === "urn:x-nmos:control:connection/v1.0"
     )?.href;
     
     if(!connectionApiBaseUrl){
-        console.error('未找到设备的合适IS-05控制端点:', receiverDevice);
-        return res.status(500).json({ 
-          message: `未找到设备 ${receiver.device_id} 的合适IS-05控制端点。控制端点: ${JSON.stringify(receiverDevice.controls)}` 
+        console.error(`未找到设备 ${receiver.device_id} 的合适IS-05控制端点。设备控制信息:`, JSON.stringify(receiverDevice.controls));
+        return res.status(500).json({
+          message: `未找到设备 ${receiver.device_id} 的合适IS-05控制端点。控制端点: ${JSON.stringify(receiverDevice.controls)}`
         });
     }
 
@@ -913,7 +914,7 @@ async function initializeIS05ConnectionManager() {
 
     // 查找合适的IS-05控制端点 for Sender
     const senderConnectionApiBaseUrl = senderDevice.controls.find(c =>
-      c.type === "urn:x-nmos:control:sr-ctrl/v1.1" || c.type === "urn:x-nmos:control:sr-ctrl/v1.0"
+      c.type === "urn:x-nmos:control:connection/v1.1" || c.type === "urn:x-nmos:control:connection/v1.0"
     )?.href;
 
     if(!senderConnectionApiBaseUrl){
@@ -929,8 +930,8 @@ async function initializeIS05ConnectionManager() {
         const tfResponse = await axios.get(senderTransportFileUrl, { timeout: 3000 });
         if (tfResponse.data && tfResponse.status === 200) {
             transportFile = {
-                data: tfResponse.data, // Assuming data is the file content (e.g., SDP string)
-                type: tfResponse.headers['content-type'] || 'application/sdp' // Use Content-Type header or default to sdp
+                data: tfResponse.data,
+                type: tfResponse.headers['content-type'] || 'application/sdp'
             };
             console.log(`成功获取发送端 ${senderId} 的transportfile。`);
         } else {
@@ -938,8 +939,6 @@ async function initializeIS05ConnectionManager() {
         }
     } catch (error) {
         console.error(`从发送端 ${senderId} 获取transportfile时出错:`, error.message);
-        // 如果获取transportfile失败，可以根据需要决定是否继续或返回错误
-        // 目前选择继续，但payload中将不包含transport_file
     }
 
     // 准备IS-05 PATCH请求的负载
@@ -949,15 +948,8 @@ async function initializeIS05ConnectionManager() {
       activation: {
         mode: "activate_immediate" // 立即激活模式
       },
-      // 根据IS-05规范，优先使用transport_file
-      ...(transportFile && { transport_file: transportFile }),
-      // 如果没有transport_file，可以尝试使用transport_params，但这通常需要Receiver支持
-      // 这里的示例不再硬编码transport_params，依赖于transport_file或Receiver的默认行为
-      transport_params: [] // 清空硬编码的transport_params示例
+      ...(transportFile && { transport_file: transportFile })
     };
-
-    // 移除之前硬编码的transport_params验证，因为现在依赖transport_file或Receiver自身处理
-    // 如果需要更严格的验证，应根据获取到的transport_file内容进行解析和验证
 
     console.log(`发送IS-05 PATCH请求到 ${targetUrl}，负载:`, JSON.stringify(payload));
     try {
@@ -1042,15 +1034,18 @@ async function initializeIS05ConnectionManager() {
     if (!receiverDevice || !receiverDevice.controls || receiverDevice.controls.length === 0) {
         return res.status(500).json({ message: `Control endpoint for receiver's device ${receiver.device_id} not found.` });
     }
-    // Assuming the first control URL is the correct one and it's for Connection API v1.1
-    const connectionApiBaseUrl = receiverDevice.controls.find(c => c.type === "urn:x-nmos:control:sr-ctrl/v1.1" || c.type === "urn:x-nmos:control:sr-ctrl/v1.0" )?.href;
+    // 查找合适的IS-05控制端点
+    const connectionApiBaseUrl = receiverDevice.controls.find(c => 
+      c.type === "urn:x-nmos:control:connection/v1.1" || c.type === "urn:x-nmos:control:connection/v1.0"
+    )?.href;
+    
     if(!connectionApiBaseUrl){
         console.error('Suitable IS-05 control endpoint not found for device:', receiverDevice);
         return res.status(500).json({ message: `Suitable IS-05 control endpoint not found for device ${receiver.device_id}. Controls: ${JSON.stringify(receiverDevice.controls)}` });
     }
 
     const targetUrl = `${connectionApiBaseUrl.replace(/\/?$/, '')}/receivers/${receiverId}/staged`;
-    
+
     // IS-05 disconnect is achieved by setting sender_id to null and master_enable to false
     const payload = {
       sender_id: null,
