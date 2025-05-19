@@ -903,19 +903,29 @@ async function initializeIS05ConnectionManager() {
     const targetUrl = `${connectionApiBaseUrl.replace(/\/?$/, '')}/receivers/${receiverId}/staged`;
     
     // 准备IS-05 PATCH请求的负载
+    // 准备IS-05 PATCH请求的负载
+    // 根据IS-05规范，transport_params的内容取决于接收端支持的传输类型
+    // 假设这里处理的是RTP传输，需要提供必要的参数
     const payload = {
       sender_id: senderId,
       master_enable: true, // 立即激活连接
       activation: {
         mode: "activate_immediate" // 立即激活模式
       },
-      transport_params: {
-        destination_ip: "239.1.1.1",
-        destination_port: 5004,
-        rtp_enabled: true,
-        source_ip: sender.transport_params?.source_ip || "0.0.0.0",
-        source_port: sender.transport_params?.source_port || 0
-      }
+      // transport_params 结构需要根据实际的Sender和Receiver能力以及NMOS规范来构建
+      // 这里的示例是基于常见的RTP流，可能需要根据实际情况调整
+      transport_params: [
+        {
+          destination_ip: "239.1.1.1", // 示例IP，需要根据实际Sender/Receiver协商或配置
+          destination_port: 5004, // 示例端口，需要根据实际Sender/Receiver协商或配置
+          rtp_enabled: true,
+          // source_ip 和 source_port 通常由Sender提供，或者由Receiver根据网络配置确定
+          // 如果Sender资源中没有这些信息，可能需要其他方式获取或配置
+          source_ip: sender.transport_params?.source_ip || "0.0.0.0", // 尝试从Sender获取，否则使用默认
+          source_port: sender.transport_params?.source_port || 0 // 尝试从Sender获取，否则使用默认
+          // 其他可能的参数如 fec_enabled, session_description 等，根据需要添加
+        }
+      ]
     };
 
     console.log(`发送IS-05 PATCH请求到 ${targetUrl}，负载:`, JSON.stringify(payload));
