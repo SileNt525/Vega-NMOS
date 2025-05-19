@@ -918,7 +918,7 @@ async function initializeIS05ConnectionManager() {
     )?.href;
 
     if(!senderConnectionApiBaseUrl){
-        console.error('未找到发送端设备的合适IS-05控制端点:', senderDevice);
+        console.error('未找到发送端设备的合适IS-05控制端点:', JSON.stringify(senderDevice, null, 2));
         return res.status(500).json({ message: `未找到发送端设备 ${sender.device_id} 的合适IS-05控制端点。控制端点: ${JSON.stringify(senderDevice.controls)}` });
     }
 
@@ -927,37 +927,74 @@ async function initializeIS05ConnectionManager() {
     let transportFile = null;
     try {
         console.log(`尝试从发送端 ${senderId} 获取transportfile: ${senderTransportFileUrl}`);
-        const tfResponse = await axios.get(senderTransportFileUrl, { timeout: 3000 });
-        if (tfResponse.data && tfResponse.status === 200) {
+        const tfResponse = await axios.get(senderTransportFileUrl, { 
+            timeout: 3000,
+            headers: {
+                'Accept': 'application/sdp, application/json',
+                'Content-Type': 'application/json'
+            },
+            validateStatus: function (status) {
+                return status >= 200 && status < 300; // 只接受2xx的响应
+            }
+        });
+
+        // 检查响应内容类型
+        const contentType = tfResponse.headers['content-type'];
+        if (!contentType || (!contentType.includes('application/sdp') && !contentType.includes('application/json'))) {
+            console.warn(`收到意外的Content-Type: ${contentType}，响应内容:`, tfResponse.data);
+            throw new Error(`Unexpected content type: ${contentType}`);
+        }
+
+        if (tfResponse.data) {
             transportFile = {
                 data: tfResponse.data,
-                type: tfResponse.headers['content-type'] || 'application/sdp'
+                type: contentType
             };
-            console.log(`成功获取发送端 ${senderId} 的transportfile。`);
+            console.log(`成功获取发送端 ${senderId} 的transportfile，Content-Type: ${contentType}`);
         } else {
-             console.warn(`从发送端 ${senderId} 获取transportfile失败，状态码: ${tfResponse.status}`);
+            console.warn(`从发送端 ${senderId} 获取到的transportfile为空`);
         }
     } catch (error) {
-        console.error(`从发送端 ${senderId} 获取transportfile时出错:`, error.message);
+        console.error(`从发送端 ${senderId} 获取transportfile时出错:`, {
+            message: error.message,
+            url: senderTransportFileUrl,
+            responseData: error.response?.data,
+            responseHeaders: error.response?.headers,
+            responseStatus: error.response?.status
+        });
+        // 记录错误但继续执行，因为transportfile是可选的
     }
 
     // 准备IS-05 PATCH请求的负载
     const payload = {
-      sender_id: senderId,
-      master_enable: true, // 立即激活连接
-      activation: {
-        mode: "activate_immediate" // 立即激活模式
-      },
-      ...(transportFile && { transport_file: transportFile })
+        sender_id: senderId,
+        master_enable: true,
+        activation: {
+            mode: "activate_immediate"
+        }
     };
 
-    console.log(`发送IS-05 PATCH请求到 ${targetUrl}，负载:`, JSON.stringify(payload));
+    // 仅在成功获取到transportfile时才添加到payload
+    if (transportFile && transportFile.data) {
+        payload.transport_file = transportFile;
+        console.log('已将transportfile添加到请求负载中');
+    } else {
+        console.log('未添加transportfile到请求负载中，将使用默认transport_params');
+    }
+
+    console.log(`发送IS-05 PATCH请求到 ${targetUrl}，负载:`, JSON.stringify(payload, null, 2));
     try {
-      // 发送PATCH请求到接收端的staged端点
-      const patchResponse = await axios.patch(targetUrl, payload, {
-        headers: { 'Content-Type': 'application/json' },
-        timeout: 5000 // 5秒超时
-      });
+        // 发送PATCH请求到接收端的staged端点
+        const patchResponse = await axios.patch(targetUrl, payload, {
+            headers: { 
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
+            timeout: 5000,
+            validateStatus: function (status) {
+                return status >= 200 && status < 300;
+            }
+        });
       
       console.log('IS-05 PATCH成功:', patchResponse.status, patchResponse.data);
       
