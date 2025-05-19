@@ -1071,18 +1071,24 @@ async function initializeIS05ConnectionManager() {
       // 根据错误类型返回适当的错误响应
       if (error.response) {
         console.error('错误详情:', error.response.status, error.response.data);
+        // 记录返回的内容类型以帮助诊断问题
+        console.error('返回的内容类型:', error.response.headers['content-type']);
+        // 检查返回内容是否为HTML
+        if (typeof error.response.data === 'string' && error.response.data.includes('<!DOCTYPE') || error.response.data.includes('<html')) {
+          console.error('警告: 接收端API返回了HTML内容而不是JSON，这可能是导致前端错误的原因。');
+        }
         res.status(error.response.status || 500).json({
-          message: `连接失败: 发送端 ${senderId} 到接收端 ${receiverId}。接收端API错误。`, 
+          message: `连接失败: 发送端 ${senderId} 到接收端 ${receiverId}。接收端API错误。`,
           error: error.response.data
         });
       } else if (error.request) {
         console.error('请求错误:', error.request);
-        res.status(504).json({ 
-          message: `连接失败: 接收端 ${targetUrl} 无响应。` 
+        res.status(504).json({
+          message: `连接失败: 接收端 ${targetUrl} 无响应。`
         });
       } else {
-        res.status(500).json({ 
-          message: '连接失败: 发送PATCH请求时发生内部服务器错误。' 
+        res.status(500).json({
+          message: '连接失败: 发送PATCH请求时发生内部服务器错误。'
         });
       }
     }
