@@ -827,21 +827,18 @@ async function initializeIS05ConnectionManager() {
       return res.status(404).json({ message: `未找到接收端 ${receiverId}` });
     }
 
-    // 查找接收端设备的控制端点
-    const receiverDevice = discoveredResources.devices.find(d => d.id === receiver.device_id);
-    if (!receiverDevice || !receiverDevice.controls || receiverDevice.controls.length === 0) {
-      return res.status(404).json({ message: `未找到接收端设备或其控制端点 ${receiver.device_id}` });
+    // 查找与接收端关联的节点以获取其API端点
+    const receiverNode = discoveredResources.nodes.find(n => n.id === receiver.node_id);
+    if (!receiverNode || !receiverNode.href) {
+      return res.status(404).json({ message: `未找到接收端 ${receiverId} 关联的节点或其API端点。节点ID: ${receiver.node_id}` });
     }
 
-    const connectionApiBaseUrl = receiverDevice.controls.find(c =>
-      c.type === "urn:x-nmos:control:connection/v1.1" || c.type === "urn:x-nmos:control:connection/v1.0"
-    )?.href;
+    // IS-05 v1.1 uses /x-nmos/connection/v1.1/
+    // Ensure the base URL from node.href is correctly formed (e.g., ends with a slash or not)
+    const nodeApiBaseUrl = receiverNode.href.replace(/\/?$/, ''); // Ensure no trailing slash for concatenation
+    const connectionApiBaseUrl = `${nodeApiBaseUrl}/x-nmos/connection/v1.1`; // Assuming v1.1
 
-    if (!connectionApiBaseUrl) {
-      return res.status(404).json({ message: `未找到接收端设备 ${receiver.device_id} 的 IS-05 连接控制端点` });
-    }
-
-    const stagedUrl = `${connectionApiBaseUrl.replace(/\/?$/, '')}/receivers/${receiverId}/staged`;
+    const stagedUrl = `${connectionApiBaseUrl}/single/receivers/${receiverId}/staged`;
 
     // 构建 PATCH 请求体
     const patchPayload = {
@@ -888,16 +885,14 @@ async function initializeIS05ConnectionManager() {
     const receiver = discoveredResources.receivers.find(r => r.id === receiverId);
     if (receiver) {
       try {
-        // 获取接收端设备的控制端点
-        const receiverDevice = discoveredResources.devices.find(d => d.id === receiver.device_id);
-        if (receiverDevice && receiverDevice.controls && receiverDevice.controls.length > 0) {
-          const connectionApiBaseUrl = receiverDevice.controls.find(c => 
-            c.type === "urn:x-nmos:control:connection/v1.1" || c.type === "urn:x-nmos:control:connection/v1.0"
-          )?.href;
+        // 获取与接收端关联的节点以获取其API端点
+        const receiverNode = discoveredResources.nodes.find(n => n.id === receiver.node_id);
+        if (receiverNode && receiverNode.href) {
+          const nodeApiBaseUrl = receiverNode.href.replace(/\/?$/, ''); // Ensure no trailing slash
+          const connectionApiBaseUrl = `${nodeApiBaseUrl}/x-nmos/connection/v1.1`; // Assuming v1.1
           
-          if (connectionApiBaseUrl) {
-            // 查询接收端的当前活动连接状态
-            const activeUrl = `${connectionApiBaseUrl.replace(/\/?$/, '')}/receivers/${receiverId}/active`;
+          // 查询接收端的当前活动连接状态
+          const activeUrl = `${connectionApiBaseUrl}/single/receivers/${receiverId}/active`;
             const response = await axios.get(activeUrl, { timeout: 3000 });
             
             if (response.data && response.status === 200) {
@@ -923,7 +918,7 @@ async function initializeIS05ConnectionManager() {
             }
           }
         }
-      } catch (error) {
+      catch (error) {
         console.error(`获取接收端 ${receiverId} 连接状态时出错:`, error.message);
         // 如果查询失败，返回缓存的状态（如果有）
       }
@@ -956,48 +951,31 @@ async function initializeIS05ConnectionManager() {
       return res.status(404).json({ message: `未找到ID为 ${senderId} 的发送端。` });
     }
 
-    // 查找与接收端关联的设备以获取其API端点
-    const receiverDevice = discoveredResources.devices.find(d => d.id === receiver.device_id);
-    if (!receiverDevice || !receiverDevice.controls || receiverDevice.controls.length === 0) {
-        console.error(`未找到接收端设备 ${receiver.device_id} 的控制端点。设备信息:`, receiverDevice);
-        return res.status(500).json({ message: `未找到接收端设备 ${receiver.device_id} 的控制端点。` });
+    // 查找与接收端关联的节点以获取其API端点
+    const receiverNode = discoveredResources.nodes.find(n => n.id === receiver.node_id);
+    if (!receiverNode || !receiverNode.href) {
+        console.error(`未找到接收端 ${receiverId} 关联的节点或其API端点。节点ID: ${receiver.node_id}`);
+        return res.status(500).json({ message: `未找到接收端 ${receiverId} 关联的节点或其API端点。` });
     }
-    
-    // 查找合适的IS-05控制端点
-    const connectionApiBaseUrl = receiverDevice.controls.find(c =>
-      c.type === "urn:x-nmos:control:connection/v1.1" || c.type === "urn:x-nmos:control:connection/v1.0"
-    )?.href;
-    
-    if(!connectionApiBaseUrl){
-        console.error(`未找到设备 ${receiver.device_id} 的合适IS-05控制端点。设备控制信息:`, JSON.stringify(receiverDevice.controls));
-        return res.status(500).json({
-          message: `未找到设备 ${receiver.device_id} 的合适IS-05控制端点。控制端点: ${JSON.stringify(receiverDevice.controls)}`
-        });
-    }
+    const receiverNodeApiBaseUrl = receiverNode.href.replace(/\/?$/, '');
+    const receiverConnectionApiBaseUrl = `${receiverNodeApiBaseUrl}/x-nmos/connection/v1.1`;
 
-    const targetUrl = `${connectionApiBaseUrl.replace(/\/?$/, '')}/receivers/${receiverId}/staged`;
+    const targetUrl = `${receiverConnectionApiBaseUrl}/single/receivers/${receiverId}/staged`;
     
     console.log('Sender resource:', JSON.stringify(sender));
     console.log('Receiver resource:', JSON.stringify(receiver));
 
-    // 查找与发送端关联的设备以获取其API端点
-    const senderDevice = discoveredResources.devices.find(d => d.id === sender.device_id);
-    if (!senderDevice || !senderDevice.controls || senderDevice.controls.length === 0) {
-        return res.status(500).json({ message: `未找到发送端设备 ${sender.device_id} 的控制端点。` });
+    // 查找与发送端关联的节点以获取其API端点
+    const senderNode = discoveredResources.nodes.find(n => n.id === sender.node_id);
+    if (!senderNode || !senderNode.href) {
+        console.error(`未找到发送端 ${senderId} 关联的节点或其API端点。节点ID: ${sender.node_id}`);
+        return res.status(500).json({ message: `未找到发送端 ${senderId} 关联的节点或其API端点。` });
     }
-
-    // 查找合适的IS-05控制端点 for Sender
-    const senderConnectionApiBaseUrl = senderDevice.controls.find(c =>
-      c.type === "urn:x-nmos:control:connection/v1.1" || c.type === "urn:x-nmos:control:connection/v1.0"
-    )?.href;
-
-    if(!senderConnectionApiBaseUrl){
-        console.error('未找到发送端设备的合适IS-05控制端点:', senderDevice);
-        return res.status(500).json({ message: `未找到发送端设备 ${sender.device_id} 的合适IS-05控制端点。控制端点: ${JSON.stringify(senderDevice.controls)}` });
-    }
+    const senderNodeApiBaseUrl = senderNode.href.replace(/\/?$/, '');
+    const senderConnectionApiBaseUrl = `${senderNodeApiBaseUrl}/x-nmos/connection/v1.1`;
 
     // 尝试从发送端获取transportfile
-    const senderTransportFileUrl = `${senderConnectionApiBaseUrl.replace(/\/?$/, '')}/senders/${senderId}/transportfile`;
+    const senderTransportFileUrl = `${senderConnectionApiBaseUrl}/single/senders/${senderId}/transportfile`;
     let transportFile = null;
     try {
         console.log(`尝试从发送端 ${senderId} 获取transportfile: ${senderTransportFileUrl}`);
@@ -1109,22 +1087,16 @@ async function initializeIS05ConnectionManager() {
       return res.status(404).json({ message: `未找到ID为 ${receiverId} 的接收端。` });
     }
 
-    // 查找与接收端关联的设备以获取其API端点
-    const receiverDevice = discoveredResources.devices.find(d => d.id === receiver.device_id);
-    if (!receiverDevice || !receiverDevice.controls || receiverDevice.controls.length === 0) {
-        return res.status(500).json({ message: `Control endpoint for receiver's device ${receiver.device_id} not found.` });
+    // 查找与接收端关联的节点以获取其API端点
+    const receiverNode = discoveredResources.nodes.find(n => n.id === receiver.node_id);
+    if (!receiverNode || !receiverNode.href) {
+        console.error(`未找到接收端 ${receiverId} 关联的节点或其API端点。节点ID: ${receiver.node_id}`);
+        return res.status(500).json({ message: `Control endpoint for receiver's node ${receiver.node_id} not found.` });
     }
-    // 查找合适的IS-05控制端点
-    const connectionApiBaseUrl = receiverDevice.controls.find(c => 
-      c.type === "urn:x-nmos:control:connection/v1.1" || c.type === "urn:x-nmos:control:connection/v1.0"
-    )?.href;
-    
-    if(!connectionApiBaseUrl){
-        console.error('Suitable IS-05 control endpoint not found for device:', receiverDevice);
-        return res.status(500).json({ message: `Suitable IS-05 control endpoint not found for device ${receiver.device_id}. Controls: ${JSON.stringify(receiverDevice.controls)}` });
-    }
+    const receiverNodeApiBaseUrl = receiverNode.href.replace(/\/?$/, '');
+    const receiverConnectionApiBaseUrl = `${receiverNodeApiBaseUrl}/x-nmos/connection/v1.1`;
 
-    const targetUrl = `${connectionApiBaseUrl.replace(/\/?$/, '')}/receivers/${receiverId}/staged`;
+    const targetUrl = `${receiverConnectionApiBaseUrl}/single/receivers/${receiverId}/staged`;
 
     // IS-05 disconnect is achieved by setting sender_id to null and master_enable to false
     const payload = {
