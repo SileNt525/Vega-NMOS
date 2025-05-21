@@ -25,7 +25,7 @@ app.use((req, res, next) => {
 });
 
 // NMOS Registration Configuration
-const NMOS_REGISTRY_REGISTRATION_URL = process.env.NMOS_REGISTRY_REGISTRATION_URL || 'http://10.11.1.14:8010/x-nmos/registration/v1.3'; // Default Registration API URL
+const NMOS_REGISTRY_REGISTRATION_URL = process.env.NMOS_REGISTRY_REGISTRATION_URL; // NMOS Registry Registration API URL (Required via environment variable)
 const NMOS_HEARTBEAT_INTERVAL_MS = parseInt(process.env.NMOS_HEARTBEAT_INTERVAL_MS || '5000', 10); // Default heartbeat interval: 5 seconds
 
 // Define NMOS Node, Device, etc. resources for this backend instance
@@ -280,7 +280,7 @@ server.listen(PORT, async () => {
 const axios = require('axios');
 
 // --- IS-04 Discovery --- 
-let currentRegistryUrl = process.env.NMOS_REGISTRY_URL || 'http://10.11.1.14:8010/x-nmos/query/v1.3'; // Default, can be overridden by env var or API
+let currentRegistryUrl = process.env.NMOS_REGISTRY_URL; // NMOS Registry Query API URL (Required via environment variable)
 let discoveredResources = {
   nodes: [],
   devices: [],
