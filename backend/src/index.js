@@ -467,7 +467,8 @@ async function createSubscription(registryUrl) {
   try {
     const response = await axios.post(subscriptionsUrl, {
       max_update_rate_ms: 100, // Request updates at most every 100ms
-      resource_path: '/'
+      resource_path: '/',
+      persist: true // Add the required 'persist' property
     });
     console.log(`Subscription creation successful: ${response.status}`);
     return response.data;
@@ -820,6 +821,7 @@ async function initializeIS05ConnectionManager() {
 
   // 处理 IS-05 连接请求 (连接或断开)
   app.post('/api/is05/connections', async (req, res) => {
+    console.log('Received IS-05 connection request body:', req.body); // Added log
     const { senderId, receiverId } = req.body;
 
     if (!receiverId) {
