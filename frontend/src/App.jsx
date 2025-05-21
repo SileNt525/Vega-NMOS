@@ -96,15 +96,15 @@ function App() {
   };
 
   const handleConnect = async (senderId, receiverId) => {
+    console.log(`Attempting to connect sender ${senderId} to receiver ${receiverId}`); // Added log
     if (!senderId || !receiverId) {
       alert('请选择发送端和接收端。');
       return;
     }
     setNotification(`正在尝试将发送端${senderId}连接到接收端${receiverId}...`);
-    setError(null);
 
     try {
-      const response = await fetch('/api/is05/connect', {
+      const response = await fetch('/api/is05/connections', { // Modified URL
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

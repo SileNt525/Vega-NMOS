@@ -468,7 +468,7 @@ async function createSubscription(registryUrl) {
     const response = await axios.post(subscriptionsUrl, {
       max_update_rate_ms: 100, // Request updates at most every 100ms
       resource_path: '/',
-      persist: true // Add the required 'persist' property
+      persist: true
     });
     console.log(`Subscription creation successful: ${response.status}`);
     return response.data;
