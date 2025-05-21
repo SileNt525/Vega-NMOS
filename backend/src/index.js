@@ -116,6 +116,11 @@ const MAX_REGISTRATION_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;
 
 async function registerControllerToRegistry() {
+  if (!NMOS_REGISTRY_REGISTRATION_URL) {
+    console.error('错误：未设置 NMOS_REGISTRY_REGISTRATION_URL 环境变量。请在运行应用前设置此变量。');
+    return false;
+  }
+
   let retryCount = 0;
   heartbeatInterval = null; // Remove redundant declaration
 
@@ -187,6 +192,11 @@ async function registerControllerToRegistry() {
 
 // Function to register resources with the NMOS Registry
 async function registerWithRegistry() {
+  if (!NMOS_REGISTRY_REGISTRATION_URL) {
+    console.error('错误：未设置 NMOS_REGISTRY_REGISTRATION_URL 环境变量。请在运行应用前设置此变量。');
+    return;
+  }
+
   console.log(`Attempting to register Node ${NODE_ID} and Device ${DEVICE_ID} with Registry at ${NMOS_REGISTRY_REGISTRATION_URL}`);
   const registrationUrl = `${NMOS_REGISTRY_REGISTRATION_URL}/resource`;
 
@@ -214,6 +224,11 @@ async function registerWithRegistry() {
 
 // Function to send heartbeat to the NMOS Registry
 async function sendHeartbeat() {
+  if (!NMOS_REGISTRY_REGISTRATION_URL) {
+    console.error('错误：未设置 NMOS_REGISTRY_REGISTRATION_URL 环境变量。无法发送心跳。');
+    return;
+  }
+
   const heartbeatUrl = `${NMOS_REGISTRY_REGISTRATION_URL}/health/${NODE_ID}`;
   try {
     const response = await axios.post(heartbeatUrl, {});
@@ -406,6 +421,21 @@ function getLinkByRel(linkHeader, relType) {
 
 // Function to perform IS-04 discovery
 async function performIS04Discovery(registryUrl) {
+  if (!registryUrl) {
+    console.error('错误：未设置 NMOS_REGISTRY_URL 环境变量。无法执行 IS-04 Discovery。');
+    // Notify frontend about the error
+    wss.clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify({
+          type: 'nmos_connection_status',
+          status: 'error',
+          message: '错误：未设置 NMOS_REGISTRY_URL 环境变量。无法执行 IS-04 Discovery。'
+        }));
+      }
+    });
+    return;
+  }
+
   console.log(`Performing IS-04 discovery from: ${registryUrl}`);
   const queryApiUrl = registryUrl.endsWith('/') ? registryUrl : `${registryUrl}/`;
   const nodesUrl = `${queryApiUrl}nodes`; // Added for nodes
@@ -488,6 +518,21 @@ const INITIAL_RECONNECT_DELAY = 1000; // 1秒
 let reconnectDelay = INITIAL_RECONNECT_DELAY;
 
 function subscribeToRegistryUpdates(registryUrl) {
+  if (!registryUrl) {
+    console.error('错误：未设置 NMOS_REGISTRY_URL 环境变量。无法订阅 IS-04 更新。');
+    // Notify frontend about the error
+    wss.clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify({
+          type: 'nmos_connection_status',
+          status: 'error',
+          message: '错误：未设置 NMOS_REGISTRY_URL 环境变量。无法订阅 IS-04 更新。'
+        }));
+      }
+    });
+    return;
+  }
+
   // 关闭现有连接（如果有）
   if (registryWebSocket) {
     try {
