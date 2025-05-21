@@ -408,10 +408,15 @@ function getLinkByRel(linkHeader, relType) {
 async function performIS04Discovery(registryUrl) {
   console.log(`Performing IS-04 discovery from: ${registryUrl}`);
   const queryApiUrl = registryUrl.endsWith('/') ? registryUrl : `${registryUrl}/`;
+  const nodesUrl = `${queryApiUrl}nodes`; // Added for nodes
   const sendersUrl = `${queryApiUrl}senders`;
   const receiversUrl = `${queryApiUrl}receivers`;
 
   try {
+    // Fetch all Nodes with pagination
+    const nodes = await fetchPaginatedResources(nodesUrl);
+    discoveredResources.nodes = nodes;
+
     // Fetch all Senders with pagination
     const senders = await fetchPaginatedResources(sendersUrl);
     discoveredResources.senders = senders;
@@ -420,7 +425,7 @@ async function performIS04Discovery(registryUrl) {
     const receivers = await fetchPaginatedResources(receiversUrl);
     discoveredResources.receivers = receivers;
 
-    console.log(`Discovered ${discoveredResources.senders.length} senders and ${discoveredResources.receivers.length} receivers.`);
+    console.log(`Discovered ${discoveredResources.nodes.length} nodes, ${discoveredResources.senders.length} senders, and ${discoveredResources.receivers.length} receivers.`);
 
     // Attempt to subscribe to IS-04 Query API WebSocket
     subscribeToRegistryUpdates(registryUrl);
