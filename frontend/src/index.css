@@ -1,12 +1,32 @@
-/* Basic modern reset and typography */
+/* Gorgeous Dark Theme - Base Styles */
 :root {
+  /* Base Font */
   font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  line-height: 1.6;
+  line-height: 1.7; 
   font-weight: 400;
+  font-size: 16px;
 
-  color-scheme: light dark;
-  color: #333;
-  background-color: #f4f4f4;
+  /* Dark Theme Base Colors */
+  --base-background: #1A202C;        /* Deep dark blue-gray */
+  --base-text: #E2E8F0;              /* Light gray for text */
+  --accent-primary: #4FD1C5;         /* Vibrant teal */
+  --accent-primary-darker: #38B2AC;  /* Darker teal for hover */
+  --accent-secondary: #63B3ED;       /* Luminous blue for links/focus */
+  --card-background: #2D3748;        /* Slightly lighter than base for cards */
+  --border-subtle: #3A475A;          /* Darker gray for borders */
+  --input-background: #2D3748;       /* Same as card for consistency */
+  --error-text: #FEB2B2;             /* Light red for error messages */
+  --error-background: #4A2222;       /* Dark red for error background */
+  --success-text: #9AE6B4;           /* Light green for success */
+  --success-background: #1C3D34;     /* Dark green for success */
+  --warning-text: #FBD38D;           /* Light orange for warning */
+  --warning-background: #4A3B22;     /* Dark orange for warning */
+  --shadow-color-primary: rgba(79, 209, 197, 0.2); /* Teal shadow for focus/glow */
+  --shadow-color-cards: rgba(0, 0, 0, 0.25);
+
+  color-scheme: dark; 
+  color: var(--base-text);
+  background-color: var(--base-background);
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -16,70 +36,96 @@
 
 body {
   margin: 0;
-  padding: 20px;
   min-width: 320px;
   min-height: 100vh;
   box-sizing: border-box;
+  transition: background-color 0.3s ease, color 0.3s ease; /* Smooth theme transitions */
 }
 
 h1, h2, h3, h4, h5, h6 {
   margin-top: 0;
-  margin-bottom: 0.5em;
-  line-height: 1.2;
+  margin-bottom: 0.75em; 
+  line-height: 1.3;   
+  font-weight: 600;   
 }
+
+h1 { font-size: 2.25em; color: var(--accent-primary); } 
+h2 { font-size: 1.75em; color: var(--accent-secondary); }
+h3 { font-size: 1.375em; color: var(--accent-primary); }
+h4 { font-size: 1.15em; color: var(--accent-secondary); } /* For group headings */
 
 a {
   font-weight: 500;
-  color: #007bff;
+  color: var(--accent-secondary); 
   text-decoration: none;
+  transition: color 0.2s ease-in-out;
 }
 a:hover {
+  color: var(--accent-primary); 
   text-decoration: underline;
 }
 
 button {
-  border-radius: 4px;
+  border-radius: 8px; 
   border: 1px solid transparent;
-  padding: 0.75em 1.5em;
-  font-size: 1em;
-  font-weight: 500;
+  padding: 0.75em 1.5em; 
+  font-size: 1em;       
+  font-weight: 600;     
   font-family: inherit;
-  background-color: #007bff;
-  color: white;
+  background-color: var(--accent-primary);
+  color: var(--base-background); /* Dark text on teal button for contrast */
   cursor: pointer;
-  transition: background-color 0.25s ease-in-out;
+  transition: background-color 0.2s ease-in-out, transform 0.1s ease-in-out, box-shadow 0.2s ease-in-out;
 }
-button:hover {
-  background-color: #0056b3;
+button:hover:not(:disabled) {
+  background-color: var(--accent-primary-darker); 
+  transform: translateY(-2px); /* Slightly more pronounced lift */
+  box-shadow: 0 4px 8px rgba(0,0,0,0.2);
 }
 button:focus,
 button:focus-visible {
-  outline: 2px auto #007bff;
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: 0 0 0 3px var(--base-background), 0 0 0 5px var(--accent-secondary); /* Double ring effect */
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
-/* Dark mode styles */
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f4f4f4;
-    background-color: #333;
-  }
-  a {
-    color: #66b2ff;
-  }
-  a:hover {
-    color: #3399ff;
-  }
-  button {
-    background-color: #66b2ff;
-    color: #333;
-  }
-  button:hover {
-    background-color: #3399ff;
-  }
-  button:focus,
-  button:focus-visible {
-    outline: 2px auto #66b2ff;
-    outline-offset: 2px;
-  }
+*::selection {
+  background-color: var(--accent-primary);
+  color: var(--base-background);
+}
+
+/* Custom Scrollbar for Webkit browsers */
+::-webkit-scrollbar {
+  width: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--base-background);
+}
+::-webkit-scrollbar-thumb {
+  background-color: var(--border-subtle);
+  border-radius: 10px;
+  border: 2px solid var(--base-background);
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--accent-secondary);
+}
+
+/* Remove default outline for focused elements if custom focus is handled (e.g., box-shadow) */
+*:focus {
+  outline: none;
+}
+*:focus-visible { /* Still provide visual cues for keyboard navigation */
+   outline: 2px solid var(--accent-secondary);
+   outline-offset: 2px;
+}
+/* For elements specifically using box-shadow for focus, remove this generic one */
+button:focus-visible, 
+input:focus-visible, 
+select:focus-visible {
+  outline: none; /* Will be handled by their specific box-shadow focus */
 }
