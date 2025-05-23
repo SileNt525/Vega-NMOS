@@ -492,24 +492,11 @@ async function performIS04Discovery(registryUrl) {
     console.log(`Discovered ${discoveredResources.nodes.length} nodes, ${discoveredResources.devices.length} devices, ${discoveredResources.senders.length} senders, ${discoveredResources.receivers.length} receivers, and ${discoveredResources.flows.length} flows.`);
 
     // Attempt to subscribe to IS-04 Query API WebSocket for real-time updates
-    // For subscribeToRegistryUpdates, we need the *actual* registry root, 
-    // not the query API base. We'll attempt to derive it.
-    // This is a heuristic: find the last occurrence of /x-nmos/ and take the part before it.
-    // If not found, it might mean registryUrl was already the root, or an unexpected format.
-    let registryRootForSubscription = normalizedRegistryUrl;
-    const nmosQueryPathIndex = normalizedRegistryUrl.lastIndexOf('/x-nmos/');
-    if (nmosQueryPathIndex > 0) {
-      registryRootForSubscription = normalizedRegistryUrl.substring(0, nmosQueryPathIndex);
-    } else {
-      // If /x-nmos/ is not found, maybe the provided URL is already the root.
-      // Or it's a non-standard URL. We'll use it as is for subscription,
-      // but log a warning if it looks like a query API path.
-      if (normalizedRegistryUrl.includes('/query/v')) {
-          console.warn(`[performIS04Discovery] The provided registryUrl "${registryUrl}" looks like a query API path but does not conform to the expected structure for deriving a root for subscriptions. Subscriptions might fail if this is not the registry root.`);
-      }
-    }
-    console.log(`[performIS04Discovery] Deduced registry root for subscriptions: ${registryRootForSubscription}`);
-    subscribeToRegistryUpdates(registryRootForSubscription); 
+    // Attempt to subscribe to IS-04 Query API WebSocket for real-time updates.
+    // The `normalizedRegistryUrl` is the Query API base URL (e.g., http://host/x-nmos/query/v1.3)
+    // and will be used as the base for POSTing to /subscriptions.
+    console.log(`[performIS04Discovery] Using Query API base for subscriptions: ${normalizedRegistryUrl}`);
+    subscribeToRegistryUpdates(normalizedRegistryUrl); 
 
     return fetchedResources; // Return the freshly fetched resources
 
@@ -533,12 +520,13 @@ let wsReconnectAttempts = {}; // Store reconnect attempts per resourcePath
 let wsReconnectDelays = {}; // Store reconnect delays per resourcePath
 
 // Helper function to fetch available top-level resource types from the Query API root
-async function fetchQueryApiRoot(registryQueryUrl) {
-  // Ensure registryQueryUrl ends with a slash for proper base URL construction
-  const baseUrl = registryQueryUrl.endsWith('/') ? registryQueryUrl : `${registryQueryUrl}/`;
-  console.log(`Fetching top-level resource types from Query API root: ${baseUrl}`);
+// The registryQueryUrl parameter is expected to be the base URL of the Query API (e.g., http://host/x-nmos/query/v1.3)
+async function fetchQueryApiRoot(registryQueryUrl) { 
+  const normalizedQueryApiBaseUrl = registryQueryUrl.replace(/\/$/, ''); // Ensure no trailing slash
+  console.log(`Fetching top-level resource types from Query API root: ${normalizedQueryApiBaseUrl}`);
   try {
-    const response = await axios.get(baseUrl);
+    // The Query API root itself lists the available resource types (nodes, devices, etc.)
+    const response = await axios.get(normalizedQueryApiBaseUrl);
     if (response.status === 200 && Array.isArray(response.data) && response.data.every(item => typeof item === 'string')) {
       console.log('Discovered top-level NMOS resource types:', response.data);
       return response.data;
@@ -547,7 +535,7 @@ async function fetchQueryApiRoot(registryQueryUrl) {
       return [];
     }
   } catch (error) {
-    console.error(`Error fetching Query API root from ${baseUrl}:`, error.message);
+    console.error(`Error fetching Query API root from ${normalizedQueryApiBaseUrl}:`, error.message);
     if (error.response) {
       console.error('Error details:', error.response.status, error.response.data);
     }
@@ -555,20 +543,23 @@ async function fetchQueryApiRoot(registryQueryUrl) {
   }
 }
 
-async function createSubscription(registryUrl, resourcePath) { // Added resourcePath parameter
-  const subscriptionsUrl = `${registryUrl.replace(/\/?$/, '')}/subscriptions`;
+// Creates a subscription.
+// The `queryApiBaseUrl` parameter is the base URL of the Query API (e.g., http://host/x-nmos/query/v1.3)
+async function createSubscription(queryApiBaseUrl, resourcePath) {
+  const normalizedQueryApiBaseUrl = queryApiBaseUrl.replace(/\/$/, ''); // Ensure no trailing slash
+  const subscriptionsUrl = `${normalizedQueryApiBaseUrl}/subscriptions`;
   console.log(`Attempting to create IS-04 subscription at ${subscriptionsUrl} for resource_path: ${resourcePath}`);
   try {
     const response = await axios.post(subscriptionsUrl, {
-      max_update_rate_ms: 100, // Request updates at most every 100ms
-      resource_path: resourcePath, // Use resourcePath parameter
+      max_update_rate_ms: 100, 
+      resource_path: resourcePath, 
       persist: true,
-      params: {} // Add empty params object
+      params: {} 
     });
     console.log(`Subscription creation successful for ${resourcePath}: ${response.status}`);
     return response.data;
   } catch (error) {
-    console.error(`Error creating IS-04 subscription:`, error.message);
+    console.error(`Error creating IS-04 subscription at ${subscriptionsUrl}:`, error.message);
     if (error.response) {
       console.error('Error details:', error.response.status, error.response.data);
     }
@@ -576,14 +567,14 @@ async function createSubscription(registryUrl, resourcePath) { // Added resource
   }
 }
 
-// 增强的IS-04 WebSocket订阅功能，包含更完善的错误处理和重连逻辑
 // Global constants for reconnection strategy
 const MAX_RECONNECT_ATTEMPTS = 10;
 const INITIAL_RECONNECT_DELAY = 1000; // 1秒
 
-// Function to attempt a single subscription and WebSocket connection
-async function attemptSpecificSubscription(registryUrl, resourcePath) {
-  console.log(`Attempting subscription for resourcePath: ${resourcePath} at ${registryUrl}`);
+// Function to attempt a single subscription and WebSocket connection.
+// The `queryApiBaseUrl` parameter is the base URL of the Query API (e.g., http://host/x-nmos/query/v1.3)
+async function attemptSpecificSubscription(queryApiBaseUrl, resourcePath) {
+  console.log(`Attempting subscription for resourcePath: ${resourcePath} using Query API base: ${queryApiBaseUrl}`);
 
   if (!wsReconnectAttempts[resourcePath]) {
     wsReconnectAttempts[resourcePath] = 0;
@@ -606,7 +597,8 @@ async function attemptSpecificSubscription(registryUrl, resourcePath) {
   }
 
   try {
-    const subscription = await createSubscription(registryUrl, resourcePath);
+    // `createSubscription` now expects the Query API base URL as its first argument.
+    const subscription = await createSubscription(queryApiBaseUrl, resourcePath);
     if (subscription && subscription.ws_href) {
       const wsUrl = subscription.ws_href.replace(/^http/, 'ws');
       console.log(`Connecting to IS-04 WebSocket for ${resourcePath}: ${wsUrl}`);
@@ -675,10 +667,9 @@ async function attemptSpecificSubscription(registryUrl, resourcePath) {
           wsReconnectAttempts[resourcePath]++;
           wsReconnectDelays[resourcePath] = Math.min(wsReconnectDelays[resourcePath] * 1.5, 30000);
           console.log(`Scheduling WebSocket reconnection for ${resourcePath} in ${wsReconnectDelays[resourcePath]}ms (attempt ${wsReconnectAttempts[resourcePath]}/${MAX_RECONNECT_ATTEMPTS})`);
-          setTimeout(() => attemptSpecificSubscription(registryUrl, resourcePath), wsReconnectDelays[resourcePath]);
+          setTimeout(() => attemptSpecificSubscription(queryApiBaseUrl, resourcePath), wsReconnectDelays[resourcePath]);
         } else {
           console.error(`Maximum WebSocket reconnection attempts for ${resourcePath} (${MAX_RECONNECT_ATTEMPTS}) reached. Giving up.`);
-          // Notify frontend about the failure for this specific path
            wss.clients.forEach(client => {
               if (client.readyState === WebSocket.OPEN) {
                 client.send(JSON.stringify({ 
@@ -693,24 +684,25 @@ async function attemptSpecificSubscription(registryUrl, resourcePath) {
       };
     } else {
       console.error(`Failed to create subscription or get WebSocket URL for ${resourcePath}.`);
-      handleSubscriptionFailure(registryUrl, `Failed to create subscription or get WebSocket URL for ${resourcePath}`, resourcePath);
+      handleSubscriptionFailure(queryApiBaseUrl, `Failed to create subscription or get WebSocket URL for ${resourcePath}`, resourcePath);
     }
   } catch (error) {
     console.error(`Error in subscription process for ${resourcePath}:`, error);
-    handleSubscriptionFailure(registryUrl, `Error in subscription process for ${resourcePath}`, resourcePath);
+    handleSubscriptionFailure(queryApiBaseUrl, `Error in subscription process for ${resourcePath}`, resourcePath);
   }
 }
 
-
-async function subscribeToRegistryUpdates(registryUrl) {
-  if (!registryUrl) {
-    console.error('错误：未设置 NMOS_REGISTRY_URL 环境变量。无法订阅 IS-04 更新。');
+// Subscribes to updates from the registry.
+// The `queryApiBaseUrl` parameter is the base URL of the Query API (e.g., http://host/x-nmos/query/v1.3)
+async function subscribeToRegistryUpdates(queryApiBaseUrl) {
+  if (!queryApiBaseUrl) {
+    console.error('Error: queryApiBaseUrl not provided for IS-04 subscription.');
     wss.clients.forEach(client => {
       if (client.readyState === WebSocket.OPEN) {
         client.send(JSON.stringify({
           type: 'nmos_connection_status',
           status: 'error',
-          message: '错误：未设置 NMOS_REGISTRY_URL 环境变量。无法订阅 IS-04 更新。'
+          message: 'Internal error: queryApiBaseUrl not provided for IS-04 subscription.'
         }));
       }
     });
@@ -732,62 +724,59 @@ async function subscribeToRegistryUpdates(registryUrl) {
   wsReconnectAttempts = {};
   wsReconnectDelays = {};
 
-  console.log(`Starting full IS-04 subscription process for registry at ${registryUrl}`);
+  console.log(`Starting full IS-04 subscription process using Query API base: ${queryApiBaseUrl}`);
 
-  const queryApiBaseUrl = registryUrl.endsWith('/') ? registryUrl : `${registryUrl}/`;
-  const availableResourceTypes = await fetchQueryApiRoot(queryApiBaseUrl);
+  // fetchQueryApiRoot expects the Query API base URL
+  const availableResourceTypes = await fetchQueryApiRoot(queryApiBaseUrl); 
 
   if (!availableResourceTypes || availableResourceTypes.length === 0) {
-    console.error('Failed to fetch resource types or no resource types found. Cannot create subscriptions.');
-    // Notify frontend about the general failure if no types are found initially
+    console.error('Failed to fetch resource types from Query API root or no resource types found. Cannot create subscriptions.');
+    // Notify frontend about the general failure
     wss.clients.forEach(client => {
       if (client.readyState === WebSocket.OPEN) {
         client.send(JSON.stringify({
           type: 'nmos_connection_status',
           status: 'error',
-          message: 'Failed to discover any resource types from registry. Cannot subscribe.'
+          message: 'Failed to discover any resource types from Query API root. Cannot subscribe.'
         }));
       }
     });
-    // Consider a global retry for fetching resource types if that's desired,
-    // but for now, we stop if no types are found on initial setup.
     return;
   }
 
   console.log(`Proceeding to create subscriptions for resource types: ${availableResourceTypes.join(', ')}`);
 
-  // Filter out "subscriptions/" from the list of resource types
-  const subscribableResourceTypes = availableResourceTypes.filter(type => type !== 'subscriptions/');
+  // Filter out "subscriptions/" and any other non-resource type paths if necessary
+  const subscribableResourceTypes = availableResourceTypes.filter(type => type !== 'subscriptions/' && !type.startsWith('admin/'));
   console.log('Attempting subscriptions for filtered resource types:', subscribableResourceTypes);
 
   if (!subscribableResourceTypes || subscribableResourceTypes.length === 0) {
     console.warn('No subscribable resource types left after filtering. No subscriptions will be made.');
-    // Optionally, notify frontend or handle as a specific type of failure if needed
-    // For now, just returning as no subscriptions can be made.
     return;
   }
 
   for (const type of subscribableResourceTypes) {
-    const resourcePath = `/${type.endsWith('/') ? type.slice(0, -1) : type}`; // Ensure path like /nodes, /devices
-    await attemptSpecificSubscription(registryUrl, resourcePath);
+    const resourcePath = `/${type.endsWith('/') ? type.slice(0, -1) : type}`; 
+    // attemptSpecificSubscription now expects the Query API base URL
+    await attemptSpecificSubscription(queryApiBaseUrl, resourcePath); 
   }
 }
 
-
-function handleSubscriptionFailure(registryUrl, errorMessage, resourcePath) { // Added resourcePath
-  // Notify frontend订阅失败
+// Handles failures in the subscription process.
+// The `queryApiBaseUrl` parameter is the base URL of the Query API.
+function handleSubscriptionFailure(queryApiBaseUrl, errorMessage, resourcePath) {
   wss.clients.forEach(client => {
     if (client.readyState === WebSocket.OPEN) {
       client.send(JSON.stringify({
         type: 'nmos_connection_status',
         status: 'error',
         message: errorMessage,
-        resourcePath: resourcePath // Include resourcePath in the error message to frontend
+        resourcePath: resourcePath 
       }));
     }
   });
 
-  if (resourcePath) { // Only attempt reconnection if a specific resourcePath is involved
+  if (resourcePath) { 
     if (!wsReconnectAttempts[resourcePath]) wsReconnectAttempts[resourcePath] = 0;
     if (!wsReconnectDelays[resourcePath]) wsReconnectDelays[resourcePath] = INITIAL_RECONNECT_DELAY;
 
@@ -795,7 +784,8 @@ function handleSubscriptionFailure(registryUrl, errorMessage, resourcePath) { //
       wsReconnectAttempts[resourcePath]++;
       wsReconnectDelays[resourcePath] = Math.min(wsReconnectDelays[resourcePath] * 1.5, 30000);
       console.log(`Scheduling subscription retry for ${resourcePath} in ${wsReconnectDelays[resourcePath]}ms (attempt ${wsReconnectAttempts[resourcePath]}/${MAX_RECONNECT_ATTEMPTS})`);
-      setTimeout(() => attemptSpecificSubscription(registryUrl, resourcePath), wsReconnectDelays[resourcePath]);
+      // attemptSpecificSubscription now expects the Query API base URL
+      setTimeout(() => attemptSpecificSubscription(queryApiBaseUrl, resourcePath), wsReconnectDelays[resourcePath]); 
     } else {
       console.error(`Maximum subscription retry attempts for ${resourcePath} (${MAX_RECONNECT_ATTEMPTS}) reached. Giving up.`);
       wss.clients.forEach(client => {
@@ -810,11 +800,7 @@ function handleSubscriptionFailure(registryUrl, errorMessage, resourcePath) { //
       });
     }
   } else {
-    // If no specific resourcePath, this is a general failure (e.g., fetching root types)
-    // A global retry for subscribeToRegistryUpdates might be too broad here,
-    // as it could be called if initial type fetching fails.
-    // For now, just log and rely on manual restart or next scheduled global attempt if any.
-    console.error(`Global subscription failure: ${errorMessage}. Manual intervention may be required if this persists.`);
+    console.error(`Global subscription failure (no specific resource path): ${errorMessage}. Manual intervention may be required.`);
   }
 }
 
