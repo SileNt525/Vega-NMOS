@@ -489,18 +489,44 @@ async function performIS04Discovery(registryUrl) {
 }
 
 // --- IS-04 WebSocket Subscription ---
-let registryWebSocket = null;
+let registryWebSockets = {}; // Manage multiple WebSockets, keyed by resourcePath
+let wsReconnectAttempts = {}; // Store reconnect attempts per resourcePath
+let wsReconnectDelays = {}; // Store reconnect delays per resourcePath
 
-async function createSubscription(registryUrl) {
+// Helper function to fetch available top-level resource types from the Query API root
+async function fetchQueryApiRoot(registryQueryUrl) {
+  // Ensure registryQueryUrl ends with a slash for proper base URL construction
+  const baseUrl = registryQueryUrl.endsWith('/') ? registryQueryUrl : `${registryQueryUrl}/`;
+  console.log(`Fetching top-level resource types from Query API root: ${baseUrl}`);
+  try {
+    const response = await axios.get(baseUrl);
+    if (response.status === 200 && Array.isArray(response.data) && response.data.every(item => typeof item === 'string')) {
+      console.log('Discovered top-level NMOS resource types:', response.data);
+      return response.data;
+    } else {
+      console.error(`Error fetching or validating Query API root: Unexpected response format or status ${response.status}. Data:`, response.data);
+      return [];
+    }
+  } catch (error) {
+    console.error(`Error fetching Query API root from ${baseUrl}:`, error.message);
+    if (error.response) {
+      console.error('Error details:', error.response.status, error.response.data);
+    }
+    return []; // Return empty array on error
+  }
+}
+
+async function createSubscription(registryUrl, resourcePath) { // Added resourcePath parameter
   const subscriptionsUrl = `${registryUrl.replace(/\/?$/, '')}/subscriptions`;
-  console.log(`Attempting to create IS-04 subscription at ${subscriptionsUrl}`);
+  console.log(`Attempting to create IS-04 subscription at ${subscriptionsUrl} for resource_path: ${resourcePath}`);
   try {
     const response = await axios.post(subscriptionsUrl, {
       max_update_rate_ms: 100, // Request updates at most every 100ms
-      resource_path: '/',
-      persist: true
+      resource_path: resourcePath, // Use resourcePath parameter
+      persist: true,
+      params: {} // Add empty params object
     });
-    console.log(`Subscription creation successful: ${response.status}`);
+    console.log(`Subscription creation successful for ${resourcePath}: ${response.status}`);
     return response.data;
   } catch (error) {
     console.error(`Error creating IS-04 subscription:`, error.message);
@@ -512,15 +538,134 @@ async function createSubscription(registryUrl) {
 }
 
 // 增强的IS-04 WebSocket订阅功能，包含更完善的错误处理和重连逻辑
-let wsReconnectAttempts = 0;
+// Global constants for reconnection strategy
 const MAX_RECONNECT_ATTEMPTS = 10;
 const INITIAL_RECONNECT_DELAY = 1000; // 1秒
-let reconnectDelay = INITIAL_RECONNECT_DELAY;
 
-function subscribeToRegistryUpdates(registryUrl) {
+// Function to attempt a single subscription and WebSocket connection
+async function attemptSpecificSubscription(registryUrl, resourcePath) {
+  console.log(`Attempting subscription for resourcePath: ${resourcePath} at ${registryUrl}`);
+
+  if (!wsReconnectAttempts[resourcePath]) {
+    wsReconnectAttempts[resourcePath] = 0;
+  }
+  if (!wsReconnectDelays[resourcePath]) {
+    wsReconnectDelays[resourcePath] = INITIAL_RECONNECT_DELAY;
+  }
+
+  // Close existing WebSocket for this resourcePath if any
+  if (registryWebSockets[resourcePath]) {
+    try {
+      if (registryWebSockets[resourcePath].readyState === WebSocket.OPEN || registryWebSockets[resourcePath].readyState === WebSocket.CONNECTING) {
+        console.log(`Closing existing WebSocket for ${resourcePath} before attempting new subscription.`);
+        registryWebSockets[resourcePath].close();
+      }
+    } catch (err) {
+      console.error(`Error closing existing WebSocket for ${resourcePath}:`, err);
+    }
+    delete registryWebSockets[resourcePath];
+  }
+
+  try {
+    const subscription = await createSubscription(registryUrl, resourcePath);
+    if (subscription && subscription.ws_href) {
+      const wsUrl = subscription.ws_href.replace(/^http/, 'ws');
+      console.log(`Connecting to IS-04 WebSocket for ${resourcePath}: ${wsUrl}`);
+      const ws = new WebSocket(wsUrl);
+      registryWebSockets[resourcePath] = ws;
+
+      ws.onopen = () => {
+        console.log(`IS-04 WebSocket for ${resourcePath} connected successfully.`);
+        wsReconnectAttempts[resourcePath] = 0;
+        wsReconnectDelays[resourcePath] = INITIAL_RECONNECT_DELAY;
+        // Notify frontend about the successful connection for this specific path
+        wss.clients.forEach(client => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({
+              type: 'nmos_connection_status',
+              status: 'connected',
+              message: `IS-04 WebSocket for ${resourcePath} subscription active`,
+              resourcePath: resourcePath
+            }));
+          }
+        });
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const grain = JSON.parse(event.data);
+          // Determine the resource type from the resourcePath for handleDataGrain
+          const typeFromPath = resourcePath.startsWith('/') ? resourcePath.substring(1) : resourcePath;
+          handleDataGrain(grain, typeFromPath); // Pass type for context
+        } catch (error) {
+          console.error(`Error parsing IS-04 WebSocket message for ${resourcePath}:`, error);
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error(`IS-04 WebSocket error for ${resourcePath}:`, error.message || error);
+        // Notify frontend about the error for this specific path
+        wss.clients.forEach(client => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({
+              type: 'nmos_connection_status',
+              status: 'error',
+              message: `IS-04 WebSocket connection error for ${resourcePath}`,
+              resourcePath: resourcePath
+            }));
+          }
+        });
+        // Note: onclose will handle reconnection attempts
+      };
+
+      ws.onclose = (event) => {
+        console.log(`IS-04 WebSocket for ${resourcePath} closed: Code=${event.code}, Reason=${event.reason}`);
+        // Notify frontend about the disconnection for this specific path
+        wss.clients.forEach(client => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({
+              type: 'nmos_connection_status',
+              status: 'disconnected',
+              message: `IS-04 WebSocket for ${resourcePath} disconnected: ${event.reason || 'Connection closed'}`,
+              resourcePath: resourcePath
+            }));
+          }
+        });
+
+        if (wsReconnectAttempts[resourcePath] < MAX_RECONNECT_ATTEMPTS) {
+          wsReconnectAttempts[resourcePath]++;
+          wsReconnectDelays[resourcePath] = Math.min(wsReconnectDelays[resourcePath] * 1.5, 30000);
+          console.log(`Scheduling WebSocket reconnection for ${resourcePath} in ${wsReconnectDelays[resourcePath]}ms (attempt ${wsReconnectAttempts[resourcePath]}/${MAX_RECONNECT_ATTEMPTS})`);
+          setTimeout(() => attemptSpecificSubscription(registryUrl, resourcePath), wsReconnectDelays[resourcePath]);
+        } else {
+          console.error(`Maximum WebSocket reconnection attempts for ${resourcePath} (${MAX_RECONNECT_ATTEMPTS}) reached. Giving up.`);
+          // Notify frontend about the failure for this specific path
+           wss.clients.forEach(client => {
+              if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({ 
+                  type: 'nmos_connection_status', 
+                  status: 'failed',
+                  message: `IS-04 WebSocket connection for ${resourcePath} failed after maximum reconnection attempts`,
+                  resourcePath: resourcePath
+                }));
+              }
+            });
+        }
+      };
+    } else {
+      console.error(`Failed to create subscription or get WebSocket URL for ${resourcePath}.`);
+      handleSubscriptionFailure(registryUrl, `Failed to create subscription or get WebSocket URL for ${resourcePath}`, resourcePath);
+    }
+  } catch (error) {
+    console.error(`Error in subscription process for ${resourcePath}:`, error);
+    handleSubscriptionFailure(registryUrl, `Error in subscription process for ${resourcePath}`, resourcePath);
+  }
+}
+
+
+async function subscribeToRegistryUpdates(registryUrl) {
   if (!registryUrl) {
     console.error('错误：未设置 NMOS_REGISTRY_URL 环境变量。无法订阅 IS-04 更新。');
-    // Notify frontend about the error
     wss.clients.forEach(client => {
       if (client.readyState === WebSocket.OPEN) {
         client.send(JSON.stringify({
@@ -533,245 +678,198 @@ function subscribeToRegistryUpdates(registryUrl) {
     return;
   }
 
-  // 关闭现有连接（如果有）
-  if (registryWebSocket) {
-    try {
-      if (registryWebSocket.readyState === WebSocket.OPEN || 
-          registryWebSocket.readyState === WebSocket.CONNECTING) {
-        registryWebSocket.close();
+  // Close and clear all existing WebSockets before starting new subscriptions
+  Object.keys(registryWebSockets).forEach(path => {
+    if (registryWebSockets[path]) {
+      try {
+        console.log(`Closing WebSocket for ${path} as part of full subscription refresh.`);
+        registryWebSockets[path].close(1000, 'Full subscription refresh initiated');
+      } catch (e) {
+        console.warn(`Error closing WebSocket for ${path} during refresh: ${e.message}`);
       }
-    } catch (err) {
-      console.error('Error closing existing WebSocket:', err);
-    }
-    registryWebSocket = null;
-  }
-
-  console.log(`Attempting to subscribe to IS-04 updates from ${registryUrl}, attempt #${wsReconnectAttempts + 1}`);
-
-  createSubscription(registryUrl)
-    .then(subscription => {
-      if (subscription && subscription.ws_href) {
-        const wsUrl = subscription.ws_href.replace(/^http/, 'ws'); // 将http/https转换为ws/wss
-        console.log(`Connecting to IS-04 WebSocket: ${wsUrl}`);
-        
-        try {
-          registryWebSocket = new WebSocket(wsUrl);
-          
-          registryWebSocket.onopen = () => {
-            console.log('IS-04 WebSocket connected successfully.');
-            // 连接成功后重置重连计数器和延迟
-            wsReconnectAttempts = 0;
-            reconnectDelay = INITIAL_RECONNECT_DELAY;
-            
-            // 通知前端WebSocket已连接
-            wss.clients.forEach(client => {
-              if (client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify({ 
-                  type: 'nmos_connection_status', 
-                  status: 'connected',
-                  message: 'IS-04 WebSocket subscription active'
-                }));
-              }
-            });
-          };
-
-          registryWebSocket.onmessage = (event) => {
-            try {
-              const grain = JSON.parse(event.data);
-              handleDataGrain(grain);
-            } catch (error) {
-              console.error('Error parsing IS-04 WebSocket message:', error);
-            }
-          };
-
-          registryWebSocket.onerror = (error) => {
-            console.error('IS-04 WebSocket error:', error);
-            // 通知前端发生错误
-            wss.clients.forEach(client => {
-              if (client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify({ 
-                  type: 'nmos_connection_status', 
-                  status: 'error',
-                  message: 'IS-04 WebSocket connection error'
-                }));
-              }
-            });
-          };
-
-          registryWebSocket.onclose = (event) => {
-            console.log(`IS-04 WebSocket closed: Code=${event.code}, Reason=${event.reason}`);
-            
-            // 通知前端连接已关闭
-            wss.clients.forEach(client => {
-              if (client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify({ 
-                  type: 'nmos_connection_status', 
-                  status: 'disconnected',
-                  message: `IS-04 WebSocket disconnected: ${event.reason || 'Connection closed'}`
-                }));
-              }
-            });
-            
-            // 实现指数退避重连策略
-            if (wsReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-              wsReconnectAttempts++;
-              reconnectDelay = Math.min(reconnectDelay * 1.5, 30000); // 最大30秒延迟
-              console.log(`Scheduling WebSocket reconnection in ${reconnectDelay}ms (attempt ${wsReconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
-              setTimeout(() => subscribeToRegistryUpdates(registryUrl), reconnectDelay);
-            } else {
-              console.error(`Maximum WebSocket reconnection attempts (${MAX_RECONNECT_ATTEMPTS}) reached. Giving up.`);
-              // 通知前端已达到最大重连次数
-              wss.clients.forEach(client => {
-                if (client.readyState === WebSocket.OPEN) {
-                  client.send(JSON.stringify({ 
-                    type: 'nmos_connection_status', 
-                    status: 'failed',
-                    message: 'IS-04 WebSocket connection failed after maximum reconnection attempts'
-                  }));
-                }
-              });
-            }
-          };
-        } catch (error) {
-          console.error('Error creating WebSocket connection:', error);
-          handleSubscriptionFailure(registryUrl, 'Error creating WebSocket connection');
-        }
-      } else {
-        console.error('Failed to create subscription or get WebSocket URL.');
-        handleSubscriptionFailure(registryUrl, 'Failed to create subscription or get WebSocket URL');
-      }
-    })
-    .catch(error => {
-      console.error('Error in subscription process:', error);
-      handleSubscriptionFailure(registryUrl, 'Error in subscription process');
-    });
-}
-
-function handleSubscriptionFailure(registryUrl, errorMessage) {
-  // 通知前端订阅失败
-  wss.clients.forEach(client => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify({ 
-        type: 'nmos_connection_status', 
-        status: 'error',
-        message: errorMessage
-      }));
     }
   });
-  
-  // 实现指数退避重连策略
-  if (wsReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-    wsReconnectAttempts++;
-    reconnectDelay = Math.min(reconnectDelay * 1.5, 30000); // 最大30秒延迟
-    console.log(`Scheduling subscription retry in ${reconnectDelay}ms (attempt ${wsReconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
-    setTimeout(() => subscribeToRegistryUpdates(registryUrl), reconnectDelay);
-  } else {
-    console.error(`Maximum subscription retry attempts (${MAX_RECONNECT_ATTEMPTS}) reached. Giving up.`);
-    // 通知前端已达到最大重试次数
+  registryWebSockets = {};
+  wsReconnectAttempts = {};
+  wsReconnectDelays = {};
+
+  console.log(`Starting full IS-04 subscription process for registry at ${registryUrl}`);
+
+  const queryApiBaseUrl = registryUrl.endsWith('/') ? registryUrl : `${registryUrl}/`;
+  const availableResourceTypes = await fetchQueryApiRoot(queryApiBaseUrl);
+
+  if (!availableResourceTypes || availableResourceTypes.length === 0) {
+    console.error('Failed to fetch resource types or no resource types found. Cannot create subscriptions.');
+    // Notify frontend about the general failure if no types are found initially
     wss.clients.forEach(client => {
       if (client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify({ 
-          type: 'nmos_connection_status', 
-          status: 'failed',
-          message: 'IS-04 subscription failed after maximum retry attempts'
+        client.send(JSON.stringify({
+          type: 'nmos_connection_status',
+          status: 'error',
+          message: 'Failed to discover any resource types from registry. Cannot subscribe.'
         }));
       }
     });
+    // Consider a global retry for fetching resource types if that's desired,
+    // but for now, we stop if no types are found on initial setup.
+    return;
+  }
+
+  console.log(`Proceeding to create subscriptions for resource types: ${availableResourceTypes.join(', ')}`);
+
+  // Filter out "subscriptions/" from the list of resource types
+  const subscribableResourceTypes = availableResourceTypes.filter(type => type !== 'subscriptions/');
+  console.log('Attempting subscriptions for filtered resource types:', subscribableResourceTypes);
+
+  if (!subscribableResourceTypes || subscribableResourceTypes.length === 0) {
+    console.warn('No subscribable resource types left after filtering. No subscriptions will be made.');
+    // Optionally, notify frontend or handle as a specific type of failure if needed
+    // For now, just returning as no subscriptions can be made.
+    return;
+  }
+
+  for (const type of subscribableResourceTypes) {
+    const resourcePath = `/${type.endsWith('/') ? type.slice(0, -1) : type}`; // Ensure path like /nodes, /devices
+    await attemptSpecificSubscription(registryUrl, resourcePath);
+  }
+}
+
+
+function handleSubscriptionFailure(registryUrl, errorMessage, resourcePath) { // Added resourcePath
+  // Notify frontend订阅失败
+  wss.clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify({
+        type: 'nmos_connection_status',
+        status: 'error',
+        message: errorMessage,
+        resourcePath: resourcePath // Include resourcePath in the error message to frontend
+      }));
+    }
+  });
+
+  if (resourcePath) { // Only attempt reconnection if a specific resourcePath is involved
+    if (!wsReconnectAttempts[resourcePath]) wsReconnectAttempts[resourcePath] = 0;
+    if (!wsReconnectDelays[resourcePath]) wsReconnectDelays[resourcePath] = INITIAL_RECONNECT_DELAY;
+
+    if (wsReconnectAttempts[resourcePath] < MAX_RECONNECT_ATTEMPTS) {
+      wsReconnectAttempts[resourcePath]++;
+      wsReconnectDelays[resourcePath] = Math.min(wsReconnectDelays[resourcePath] * 1.5, 30000);
+      console.log(`Scheduling subscription retry for ${resourcePath} in ${wsReconnectDelays[resourcePath]}ms (attempt ${wsReconnectAttempts[resourcePath]}/${MAX_RECONNECT_ATTEMPTS})`);
+      setTimeout(() => attemptSpecificSubscription(registryUrl, resourcePath), wsReconnectDelays[resourcePath]);
+    } else {
+      console.error(`Maximum subscription retry attempts for ${resourcePath} (${MAX_RECONNECT_ATTEMPTS}) reached. Giving up.`);
+      wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(JSON.stringify({
+            type: 'nmos_connection_status',
+            status: 'failed',
+            message: `IS-04 subscription for ${resourcePath} failed after maximum retry attempts`,
+            resourcePath: resourcePath
+          }));
+        }
+      });
+    }
+  } else {
+    // If no specific resourcePath, this is a general failure (e.g., fetching root types)
+    // A global retry for subscribeToRegistryUpdates might be too broad here,
+    // as it could be called if initial type fetching fails.
+    // For now, just log and rely on manual restart or next scheduled global attempt if any.
+    console.error(`Global subscription failure: ${errorMessage}. Manual intervention may be required if this persists.`);
   }
 }
 
 // Function to handle incoming Data Grains
-function handleDataGrain(grain) {
+function handleDataGrain(grain, resourceType) { // Added resourceType parameter
   try {
     if (!grain || !grain.grain || !grain.grain.data) {
       console.error('Invalid data grain format:', grain);
       return;
     }
     
-    const { topic, data } = grain.grain;
-    
-    // 根据topic类型处理不同资源变更
-    switch (topic) {
-      case '/nodes/':
-      case '/devices/':
-      case '/sources/':
-      case '/flows/':
-      case '/senders/':
-      case '/receivers/':
-        if (!Array.isArray(data)) {
-          console.error('Invalid data format: expected array', data);
-          return;
-        }
+    // The 'topic' from grain.grain.topic (e.g., /nodes/) should align with the 'resourceType' parameter (e.g., "nodes")
+    // The 'resourceType' parameter is now the authoritative source for the type of items in grain.grain.data.
+    const { data } = grain.grain; // 'data' is the array of changes.
 
-        data.forEach(changeData => {
-          if (!changeData || !changeData.path) {
-            console.warn('Invalid change data format:', changeData);
-            return;
-          }
-
-          const resourcePath = changeData.path;
-      const pathParts = resourcePath.split('/');
-      const resourceType = pathParts[1];
-      const resourceId = pathParts[2];
-          
-          if (!resourceType || !resourceId) {
-            console.warn('Received malformed data grain path:', resourcePath);
-            return;
-          }
-          
-          // 处理不同类型的变更
-          const resourceArray = discoveredResources[resourceType];
-          if (!Array.isArray(resourceArray)) {
-            console.warn(`Unknown resource type: ${resourceType}`);
-            return;
-          }
-
-          let changeType = '';
-          if (changeData.post && !changeData.pre) { // 新增资源
-            changeType = 'added';
-            console.log(`Resource added: ${resourceType}/${resourceId}`);
-            resourceArray.push(changeData.post);
-          } else if (!changeData.post && changeData.pre) { // 移除资源
-            changeType = 'removed';
-            console.log(`Resource removed: ${resourceType}/${resourceId}`);
-            const index = resourceArray.findIndex(res => res.id === resourceId);
-            if (index !== -1) {
-              resourceArray.splice(index, 1);
-            }
-          } else if (changeData.post && changeData.pre) { // 修改或同步
-            const isSync = JSON.stringify(changeData.pre) === JSON.stringify(changeData.post);
-            changeType = isSync ? 'synced' : 'modified';
-            console.log(`Resource ${changeType}: ${resourceType}/${resourceId}`);
-            const index = resourceArray.findIndex(res => res.id === resourceId);
-            if (index !== -1) {
-              resourceArray[index] = changeData.post;
-            } else {
-              resourceArray.push(changeData.post);
-            }
-          }
-          
-          // 通知前端资源变更
-          const updateMessage = {
-            type: 'nmos_resource_update',
-            resourceType,
-            resourceId,
-            changeType,
-            data: changeData.post || null
-          };
-
-          wss.clients.forEach(client => {
-            if (client.readyState === WebSocket.OPEN) {
-              client.send(JSON.stringify(updateMessage));
-            }
-          });
-        });
-        break;
-        
-      default:
-        console.log(`Received unhandled resource type change: ${topic}`);
+    // Validate the resourceType parameter itself
+    if (!resourceType || !discoveredResources.hasOwnProperty(resourceType)) {
+      console.warn(`Received grain with unknown or invalid resourceType parameter: '${resourceType}'. Full grain: ${JSON.stringify(grain)}`);
+      return;
     }
+
+    if (!Array.isArray(data)) {
+      console.error(`Invalid data format in grain for resourceType '${resourceType}': expected array, got ${typeof data}. Grain: ${JSON.stringify(grain)}`);
+      return;
+    }
+
+    const resourceArray = discoveredResources[resourceType];
+
+    data.forEach(changeData => {
+      if (!changeData || !changeData.path) {
+        console.warn(`Invalid change data format or missing path in grain for resourceType '${resourceType}'. Change data: ${JSON.stringify(changeData)}`);
+        return;
+      }
+
+      const resourceId = changeData.path; // This is the ID, e.g., "node_id_123"
+
+      // The resourceType is already known from the function parameter.
+      // No need to parse from pathParts.
+
+      let changeType = '';
+      if (changeData.post && !changeData.pre) { // New resource
+        changeType = 'added';
+        console.log(`Resource added: ${resourceType}/${resourceId}`);
+        if (resourceType === 'receivers' && (!changeData.post.node_id)) {
+          console.warn(`Receiver data from grain (added) is missing node_id. ID: ${resourceId}, Data: ${JSON.stringify(changeData.post)}`);
+        }
+        resourceArray.push(changeData.post);
+      } else if (!changeData.post && changeData.pre) { // Removed resource
+        changeType = 'removed';
+        console.log(`Resource removed: ${resourceType}/${resourceId}`);
+        const index = resourceArray.findIndex(res => res.id === resourceId);
+        if (index !== -1) {
+          resourceArray.splice(index, 1);
+        }
+      } else if (changeData.post && changeData.pre) { // Modified or synced resource
+        const isSync = JSON.stringify(changeData.pre) === JSON.stringify(changeData.post);
+        changeType = isSync ? 'synced' : 'modified';
+        // console.log(`Resource ${changeType}: ${resourceType}/${resourceId}`); // Less verbose logging for sync/modify
+        const index = resourceArray.findIndex(res => res.id === resourceId);
+        if (index !== -1) {
+          if (resourceType === 'receivers' && (!changeData.post.node_id)) {
+            console.warn(`Receiver data from grain (modified/synced) is missing node_id. ID: ${resourceId}, Data: ${JSON.stringify(changeData.post)}`);
+          }
+          resourceArray[index] = changeData.post;
+        } else {
+          console.warn(`Resource ${resourceId} (type ${resourceType}) not found for ${changeType}, adding instead. This might indicate an issue with initial discovery or prior state.`);
+          if (resourceType === 'receivers' && (!changeData.post.node_id)) {
+             console.warn(`Receiver data from grain (modified/synced, added as new) is missing node_id. ID: ${resourceId}, Data: ${JSON.stringify(changeData.post)}`);
+          }
+          resourceArray.push(changeData.post);
+        }
+      } else {
+        console.warn(`Unhandled change type for ${resourceType}/${resourceId}. changeData: ${JSON.stringify(changeData)}`);
+        return; // Skip if no changeType can be determined
+      }
+      
+      // Notify frontend about the resource change
+      const updateMessage = {
+        type: 'nmos_resource_update',
+        resourceType: resourceType, // Use the function parameter
+        resourceId: resourceId,    // Use the derived ID
+        changeType,
+        data: changeData.post || null // Send the 'post' state, or null if removed
+      };
+
+      wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(JSON.stringify(updateMessage));
+        }
+      });
+    });
+
   } catch (error) {
-    console.error('Error processing data grain:', error);
+    console.error(`Error processing data grain for resourceType '${resourceType}':`, error);
     const errorMessage = {
       type: 'nmos_error',
       message: 'Failed to process registry update',
@@ -838,13 +936,22 @@ app.post('/api/nmos/stop-registry', (req, res) => {
   }
 
   // Close WebSocket connection
-  if (registryWebSocket) {
-    registryWebSocket.close();
-    registryWebSocket = null;
-    console.log('IS-04 WebSocket connection closed.');
-  }
+  Object.keys(registryWebSockets).forEach(path => {
+    if (registryWebSockets[path]) {
+      try {
+        console.log(`Closing WebSocket for ${path} due to stop-registry request.`);
+        registryWebSockets[path].close(1000, 'Stop registry request received');
+      } catch (e) {
+        console.warn(`Error closing WebSocket for ${path} during stop: ${e.message}`);
+      }
+    }
+  });
+  registryWebSockets = {};
+  wsReconnectAttempts = {};
+  wsReconnectDelays = {};
+  console.log('All IS-04 WebSocket connections closed and management objects cleared.');
 
-  // TODO: Implement logic to unregister from the registry if necessary
+  // TODO: Implement logic to unregister from the registry if necessary (e.g., delete subscriptions)
 
   res.json({ message: 'Connection to NMOS Registry stopped.' });
 });
@@ -852,6 +959,30 @@ app.post('/api/nmos/stop-registry', (req, res) => {
 // --- IS-05 Connection Management --- 
 // 存储活动连接的映射表，用于跟踪当前连接状态
 let activeConnections = {}; // 格式: { receiverId: { senderId, timestamp, status } }
+
+// Helper function to determine the IS-05 connection API URL
+function getConnectionApiUrl(node, serviceType, preferredVersion, fallbackVersion) {
+  if (node && node.api && node.api.endpoints && Array.isArray(node.api.endpoints)) {
+    const preferredEndpoint = node.api.endpoints.find(ep =>
+      (ep.type === serviceType && ep.href && ep.href.includes(`/${preferredVersion}`)) ||
+      (ep.href && ep.href.includes(`/x-nmos/connection/${preferredVersion}`)) // More specific check for connection API
+    );
+    if (preferredEndpoint && preferredEndpoint.href) {
+      console.log(`Found ${preferredVersion} endpoint for ${serviceType} at ${node.id}: ${preferredEndpoint.href}`);
+      return preferredEndpoint.href.replace(/\/?$/, ''); // Ensure no trailing slash
+    }
+
+    const fallbackEndpoint = node.api.endpoints.find(ep =>
+      (ep.type === serviceType && ep.href && ep.href.includes(`/${fallbackVersion}`)) ||
+      (ep.href && ep.href.includes(`/x-nmos/connection/${fallbackVersion}`)) // More specific check for connection API
+    );
+    if (fallbackEndpoint && fallbackEndpoint.href) {
+      console.log(`Found ${fallbackVersion} endpoint for ${serviceType} at ${node.id}: ${fallbackEndpoint.href}`);
+      return fallbackEndpoint.href.replace(/\/?$/, ''); // Ensure no trailing slash
+    }
+  }
+  return null; // Indicates no specific endpoint found
+}
 
 async function initializeIS05ConnectionManager() {
   console.log('Initializing IS-05 Connection Manager...');
@@ -879,16 +1010,28 @@ async function initializeIS05ConnectionManager() {
       return res.status(404).json({ message: `未找到接收端 ${receiverId}` });
     }
 
+    // Validate receiver.node_id
+    if (!receiver.node_id || typeof receiver.node_id !== 'string' || receiver.node_id.trim() === '') {
+        console.error(`Error: Receiver with ID '${receiverId}' is missing a valid 'node_id'. Receiver data: ${JSON.stringify(receiver)}`);
+        return res.status(500).json({ message: `Receiver '${receiverId}' has no associated node_id. Cannot proceed with IS-05 operation.` });
+    }
+
     // 查找与接收端关联的节点以获取其API端点
     const receiverNode = discoveredResources.nodes.find(n => n.id === receiver.node_id);
     if (!receiverNode || !receiverNode.href) {
       return res.status(404).json({ message: `未找到接收端 ${receiverId} 关联的节点或其API端点。节点ID: ${receiver.node_id}` });
     }
 
-    // IS-05 v1.1 uses /x-nmos/connection/v1.1/
-    // Ensure the base URL from node.href is correctly formed (e.g., ends with a slash or not)
-    const nodeApiBaseUrl = receiverNode.href.replace(/\/?$/, ''); // Ensure no trailing slash for concatenation
-    const connectionApiBaseUrl = `${nodeApiBaseUrl}/x-nmos/connection/v1.1`; // Assuming v1.1
+    let connectionApiBaseUrl = getConnectionApiUrl(receiverNode, 'urn:x-nmos:service:connection', 'v1.1', 'v1.0');
+    const nodeApiBaseUrl = receiverNode.href.replace(/\/?$/, ''); // Base for default construction
+
+    if (!connectionApiBaseUrl) {
+      console.log(`No specific IS-05 connection endpoint found for node ${receiverNode.id} in /api/is05/connections. Defaulting to v1.1 path construction.`);
+      connectionApiBaseUrl = `${nodeApiBaseUrl}/x-nmos/connection/v1.1`;
+    } else {
+      // If connectionApiBaseUrl is a full URL from href, we use it directly.
+      // The helper already ensures no trailing slash.
+    }
 
     const stagedUrl = `${connectionApiBaseUrl}/single/receivers/${receiverId}/staged`;
 
@@ -900,6 +1043,7 @@ async function initializeIS05ConnectionManager() {
       }
     };
 
+    console.log(`Attempting IS-05 PATCH request to: ${stagedUrl}`); // New log line
     console.log(`向接收端 ${receiverId} 的 staged 端点发送 PATCH 请求: ${stagedUrl}，负载:`, patchPayload);
 
     try {
@@ -940,11 +1084,18 @@ async function initializeIS05ConnectionManager() {
         // 获取与接收端关联的节点以获取其API端点
         const receiverNode = discoveredResources.nodes.find(n => n.id === receiver.node_id);
         if (receiverNode && receiverNode.href) {
-          const nodeApiBaseUrl = receiverNode.href.replace(/\/?$/, ''); // Ensure no trailing slash
-          const connectionApiBaseUrl = `${nodeApiBaseUrl}/x-nmos/connection/v1.1`; // Assuming v1.1
+          let connectionApiBaseUrl = getConnectionApiUrl(receiverNode, 'urn:x-nmos:service:connection', 'v1.1', 'v1.0');
+          const nodeApiBaseUrl = receiverNode.href.replace(/\/?$/, '');
+
+          if (!connectionApiBaseUrl) {
+            // console.log(`No specific IS-05 connection endpoint found for node ${receiverNode.id} in GET /api/is05/connections/:receiverId. Defaulting to v1.1 path construction.`);
+            // Using a console.warn or a more specific log for GET might be too verbose, let's keep it lean for GET.
+            connectionApiBaseUrl = `${nodeApiBaseUrl}/x-nmos/connection/v1.1`;
+          }
           
           // 查询接收端的当前活动连接状态
           const activeUrl = `${connectionApiBaseUrl}/single/receivers/${receiverId}/active`;
+          // console.log(`Attempting IS-05 GET request to: ${activeUrl}`); // Logging for GET might be too verbose
             const response = await axios.get(activeUrl, { timeout: 3000 });
             
             if (response.data && response.status === 200) {
@@ -1003,14 +1154,25 @@ async function initializeIS05ConnectionManager() {
       return res.status(404).json({ message: `未找到ID为 ${senderId} 的发送端。` });
     }
 
+    // Validate receiver.node_id
+    if (!receiver.node_id || typeof receiver.node_id !== 'string' || receiver.node_id.trim() === '') {
+        console.error(`Error: Receiver with ID '${receiverId}' is missing a valid 'node_id'. Receiver data: ${JSON.stringify(receiver)}`);
+        return res.status(500).json({ message: `Receiver '${receiverId}' has no associated node_id. Cannot proceed with IS-05 operation.` });
+    }
+
     // 查找与接收端关联的节点以获取其API端点
     const receiverNode = discoveredResources.nodes.find(n => n.id === receiver.node_id);
     if (!receiverNode || !receiverNode.href) {
         console.error(`未找到接收端 ${receiverId} 关联的节点或其API端点。节点ID: ${receiver.node_id}`);
         return res.status(500).json({ message: `未找到接收端 ${receiverId} 关联的节点或其API端点。` });
     }
-    const receiverNodeApiBaseUrl = receiverNode.href.replace(/\/?$/, '');
-    const receiverConnectionApiBaseUrl = `${receiverNodeApiBaseUrl}/x-nmos/connection/v1.1`;
+    
+    let receiverConnectionApiBaseUrl = getConnectionApiUrl(receiverNode, 'urn:x-nmos:service:connection', 'v1.1', 'v1.0');
+    const receiverNodeApiBase = receiverNode.href.replace(/\/?$/, '');
+    if (!receiverConnectionApiBaseUrl) {
+      console.log(`No specific IS-05 connection endpoint found for receiver node ${receiverNode.id} in /api/is05/connect. Defaulting to v1.1 path construction.`);
+      receiverConnectionApiBaseUrl = `${receiverNodeApiBase}/x-nmos/connection/v1.1`;
+    }
 
     const targetUrl = `${receiverConnectionApiBaseUrl}/single/receivers/${receiverId}/staged`;
     
@@ -1023,14 +1185,19 @@ async function initializeIS05ConnectionManager() {
         console.error(`未找到发送端 ${senderId} 关联的节点或其API端点。节点ID: ${sender.node_id}`);
         return res.status(500).json({ message: `未找到发送端 ${senderId} 关联的节点或其API端点。` });
     }
-    const senderNodeApiBaseUrl = senderNode.href.replace(/\/?$/, '');
-    const senderConnectionApiBaseUrl = `${senderNodeApiBaseUrl}/x-nmos/connection/v1.1`;
+
+    let senderConnectionApiBaseUrl = getConnectionApiUrl(senderNode, 'urn:x-nmos:service:connection', 'v1.1', 'v1.0');
+    const senderNodeApiBase = senderNode.href.replace(/\/?$/, '');
+    if (!senderConnectionApiBaseUrl) {
+      console.log(`No specific IS-05 connection endpoint found for sender node ${senderNode.id} in /api/is05/connect (for transportfile). Defaulting to v1.1 path construction.`);
+      senderConnectionApiBaseUrl = `${senderNodeApiBase}/x-nmos/connection/v1.1`;
+    }
 
     // 尝试从发送端获取transportfile
     const senderTransportFileUrl = `${senderConnectionApiBaseUrl}/single/senders/${senderId}/transportfile`;
     let transportFile = null;
     try {
-        console.log(`尝试从发送端 ${senderId} 获取transportfile: ${senderTransportFileUrl}`);
+        console.log(`Attempting to GET transportfile from: ${senderTransportFileUrl}`); // Log for transportfile GET
         const tfResponse = await axios.get(senderTransportFileUrl, { timeout: 3000 });
         if (tfResponse.data && tfResponse.status === 200) {
             transportFile = {
@@ -1055,6 +1222,7 @@ async function initializeIS05ConnectionManager() {
       ...(transportFile && { transport_file: transportFile })
     };
 
+    console.log(`Attempting IS-05 PATCH request to: ${targetUrl}`); // New log line
     console.log(`发送IS-05 PATCH请求到 ${targetUrl}，负载:`, JSON.stringify(payload));
     try {
       // 发送PATCH请求到接收端的staged端点
@@ -1138,15 +1306,26 @@ async function initializeIS05ConnectionManager() {
       return res.status(404).json({ message: `未找到ID为 ${receiverId} 的接收端。` });
     }
 
+    // Validate receiver.node_id
+    if (!receiver.node_id || typeof receiver.node_id !== 'string' || receiver.node_id.trim() === '') {
+        console.error(`Error: Receiver with ID '${receiverId}' is missing a valid 'node_id'. Receiver data: ${JSON.stringify(receiver)}`);
+        return res.status(500).json({ message: `Receiver '${receiverId}' has no associated node_id. Cannot proceed with IS-05 operation.` });
+    }
+
     // 查找与接收端关联的节点以获取其API端点
     const receiverNode = discoveredResources.nodes.find(n => n.id === receiver.node_id);
     if (!receiverNode || !receiverNode.href) {
         console.error(`未找到接收端 ${receiverId} 关联的节点或其API端点。节点ID: ${receiver.node_id}`);
         return res.status(500).json({ message: `Control endpoint for receiver's node ${receiver.node_id} not found.` });
     }
-    const receiverNodeApiBaseUrl = receiverNode.href.replace(/\/?$/, '');
-    const receiverConnectionApiBaseUrl = `${receiverNodeApiBaseUrl}/x-nmos/connection/v1.1`;
 
+    let receiverConnectionApiBaseUrl = getConnectionApiUrl(receiverNode, 'urn:x-nmos:service:connection', 'v1.1', 'v1.0');
+    const receiverNodeApiBase = receiverNode.href.replace(/\/?$/, '');
+    if (!receiverConnectionApiBaseUrl) {
+      console.log(`No specific IS-05 connection endpoint found for receiver node ${receiverNode.id} in /api/is05/disconnect. Defaulting to v1.1 path construction.`);
+      receiverConnectionApiBaseUrl = `${receiverNodeApiBase}/x-nmos/connection/v1.1`;
+    }
+    
     const targetUrl = `${receiverConnectionApiBaseUrl}/single/receivers/${receiverId}/staged`;
 
     // IS-05 disconnect is achieved by setting sender_id to null and master_enable to false
@@ -1155,6 +1334,7 @@ async function initializeIS05ConnectionManager() {
       master_enable: false, 
     };
 
+    console.log(`Attempting IS-05 PATCH request to: ${targetUrl}`); // New log line
     console.log(`Sending IS-05 PATCH to ${targetUrl} with payload:`, JSON.stringify(payload));
 
     try {
