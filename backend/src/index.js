@@ -717,7 +717,18 @@ async function subscribeToRegistryUpdates(registryUrl) {
 
   console.log(`Proceeding to create subscriptions for resource types: ${availableResourceTypes.join(', ')}`);
 
-  for (const type of availableResourceTypes) { // Corrected variable name from resourceTypes to availableResourceTypes
+  // Filter out "subscriptions/" from the list of resource types
+  const subscribableResourceTypes = availableResourceTypes.filter(type => type !== 'subscriptions/');
+  console.log('Attempting subscriptions for filtered resource types:', subscribableResourceTypes);
+
+  if (!subscribableResourceTypes || subscribableResourceTypes.length === 0) {
+    console.warn('No subscribable resource types left after filtering. No subscriptions will be made.');
+    // Optionally, notify frontend or handle as a specific type of failure if needed
+    // For now, just returning as no subscriptions can be made.
+    return;
+  }
+
+  for (const type of subscribableResourceTypes) {
     const resourcePath = `/${type.endsWith('/') ? type.slice(0, -1) : type}`; // Ensure path like /nodes, /devices
     await attemptSpecificSubscription(registryUrl, resourcePath);
   }
