@@ -730,6 +730,9 @@ function handleDataGrain(grain) {
           if (changeData.post && !changeData.pre) { // 新增资源
             changeType = 'added';
             console.log(`Resource added: ${resourceType}/${resourceId}`);
+            if (resourceType === 'receivers' && (!changeData.post.node_id)) {
+              console.warn(`Receiver data from grain (added) is missing node_id. Path: ${resourcePath}, Data: ${JSON.stringify(changeData.post)}`);
+            }
             resourceArray.push(changeData.post);
           } else if (!changeData.post && changeData.pre) { // 移除资源
             changeType = 'removed';
@@ -744,8 +747,18 @@ function handleDataGrain(grain) {
             console.log(`Resource ${changeType}: ${resourceType}/${resourceId}`);
             const index = resourceArray.findIndex(res => res.id === resourceId);
             if (index !== -1) {
+              if (resourceType === 'receivers' && (!changeData.post.node_id)) {
+                console.warn(`Receiver data from grain (modified/synced) is missing node_id. Path: ${resourcePath}, Data: ${JSON.stringify(changeData.post)}`);
+              }
               resourceArray[index] = changeData.post;
             } else {
+              // Resource not found in array, but it's a modification/sync event (implies pre-existing)
+              // This case should ideally not happen if discovery is robust.
+              // However, if it does, treat as an add but log a warning.
+              console.warn(`Resource ${resourceId} not found for ${changeType}, adding instead. This might indicate an issue with initial discovery or prior state.`);
+              if (resourceType === 'receivers' && (!changeData.post.node_id)) {
+                console.warn(`Receiver data from grain (modified/synced, added as new) is missing node_id. Path: ${resourcePath}, Data: ${JSON.stringify(changeData.post)}`);
+              }
               resourceArray.push(changeData.post);
             }
           }
@@ -903,6 +916,12 @@ async function initializeIS05ConnectionManager() {
       return res.status(404).json({ message: `未找到接收端 ${receiverId}` });
     }
 
+    // Validate receiver.node_id
+    if (!receiver.node_id || typeof receiver.node_id !== 'string' || receiver.node_id.trim() === '') {
+        console.error(`Error: Receiver with ID '${receiverId}' is missing a valid 'node_id'. Receiver data: ${JSON.stringify(receiver)}`);
+        return res.status(500).json({ message: `Receiver '${receiverId}' has no associated node_id. Cannot proceed with IS-05 operation.` });
+    }
+
     // 查找与接收端关联的节点以获取其API端点
     const receiverNode = discoveredResources.nodes.find(n => n.id === receiver.node_id);
     if (!receiverNode || !receiverNode.href) {
@@ -1039,6 +1058,12 @@ async function initializeIS05ConnectionManager() {
     }
     if (!sender) {
       return res.status(404).json({ message: `未找到ID为 ${senderId} 的发送端。` });
+    }
+
+    // Validate receiver.node_id
+    if (!receiver.node_id || typeof receiver.node_id !== 'string' || receiver.node_id.trim() === '') {
+        console.error(`Error: Receiver with ID '${receiverId}' is missing a valid 'node_id'. Receiver data: ${JSON.stringify(receiver)}`);
+        return res.status(500).json({ message: `Receiver '${receiverId}' has no associated node_id. Cannot proceed with IS-05 operation.` });
     }
 
     // 查找与接收端关联的节点以获取其API端点
@@ -1185,6 +1210,12 @@ async function initializeIS05ConnectionManager() {
 
     if (!receiver) {
       return res.status(404).json({ message: `未找到ID为 ${receiverId} 的接收端。` });
+    }
+
+    // Validate receiver.node_id
+    if (!receiver.node_id || typeof receiver.node_id !== 'string' || receiver.node_id.trim() === '') {
+        console.error(`Error: Receiver with ID '${receiverId}' is missing a valid 'node_id'. Receiver data: ${JSON.stringify(receiver)}`);
+        return res.status(500).json({ message: `Receiver '${receiverId}' has no associated node_id. Cannot proceed with IS-05 operation.` });
     }
 
     // 查找与接收端关联的节点以获取其API端点
