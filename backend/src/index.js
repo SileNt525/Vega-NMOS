@@ -448,15 +448,17 @@ async function performIS04Discovery(registryUrl) {
   }
 
   console.log(`Performing IS-04 discovery from: ${registryUrl}`);
-  // NMOS Query API base URL
-  const queryApiBaseUrl = registryUrl.endsWith('/') ? `${registryUrl}x-nmos/query/v1.3/` : `${registryUrl}/x-nmos/query/v1.3/`;
+  // Normalize registryUrl: remove any trailing slash.
+  // This URL is now assumed to be the base of the Query API itself 
+  // (e.g., http://example.com/x-nmos/query/v1.3)
+  const normalizedRegistryUrl = registryUrl.replace(/\/$/, '');
 
   const resourcesToFetch = [
-    { name: 'nodes', path: 'nodes' },
-    { name: 'devices', path: 'devices' },
-    { name: 'senders', path: 'senders' },
-    { name: 'receivers', path: 'receivers' },
-    { name: 'flows', path: 'flows' }
+    { name: 'nodes', path: '/nodes' }, // Paths now start with a slash
+    { name: 'devices', path: '/devices' },
+    { name: 'senders', path: '/senders' },
+    { name: 'receivers', path: '/receivers' },
+    { name: 'flows', path: '/flows' }
   ];
 
   const fetchedResources = {
@@ -469,7 +471,8 @@ async function performIS04Discovery(registryUrl) {
 
   try {
     for (const resourceInfo of resourcesToFetch) {
-      const fullUrl = `${queryApiBaseUrl}${resourceInfo.path}`;
+      // Construct full URL by appending the resource path to the normalized registry URL
+      const fullUrl = `${normalizedRegistryUrl}${resourceInfo.path}`;
       console.log(`Fetching ${resourceInfo.name} from ${fullUrl}`);
       fetchedResources[resourceInfo.name] = await fetchPaginatedResources(fullUrl);
       console.log(`Successfully fetched ${fetchedResources[resourceInfo.name].length} ${resourceInfo.name}.`);
@@ -489,8 +492,24 @@ async function performIS04Discovery(registryUrl) {
     console.log(`Discovered ${discoveredResources.nodes.length} nodes, ${discoveredResources.devices.length} devices, ${discoveredResources.senders.length} senders, ${discoveredResources.receivers.length} receivers, and ${discoveredResources.flows.length} flows.`);
 
     // Attempt to subscribe to IS-04 Query API WebSocket for real-time updates
-    // This should use the main registry URL, not the query API base path for subscription creation.
-    subscribeToRegistryUpdates(registryUrl); 
+    // For subscribeToRegistryUpdates, we need the *actual* registry root, 
+    // not the query API base. We'll attempt to derive it.
+    // This is a heuristic: find the last occurrence of /x-nmos/ and take the part before it.
+    // If not found, it might mean registryUrl was already the root, or an unexpected format.
+    let registryRootForSubscription = normalizedRegistryUrl;
+    const nmosQueryPathIndex = normalizedRegistryUrl.lastIndexOf('/x-nmos/');
+    if (nmosQueryPathIndex > 0) {
+      registryRootForSubscription = normalizedRegistryUrl.substring(0, nmosQueryPathIndex);
+    } else {
+      // If /x-nmos/ is not found, maybe the provided URL is already the root.
+      // Or it's a non-standard URL. We'll use it as is for subscription,
+      // but log a warning if it looks like a query API path.
+      if (normalizedRegistryUrl.includes('/query/v')) {
+          console.warn(`[performIS04Discovery] The provided registryUrl "${registryUrl}" looks like a query API path but does not conform to the expected structure for deriving a root for subscriptions. Subscriptions might fail if this is not the registry root.`);
+      }
+    }
+    console.log(`[performIS04Discovery] Deduced registry root for subscriptions: ${registryRootForSubscription}`);
+    subscribeToRegistryUpdates(registryRootForSubscription); 
 
     return fetchedResources; // Return the freshly fetched resources
 

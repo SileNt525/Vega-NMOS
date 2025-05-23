@@ -167,7 +167,7 @@ function App() {
             id="registryUrl"
             value={registryUrl}
             onChange={(e) => setRegistryUrl(e.target.value)}
-            placeholder="例如：http://localhost:8080" // Example placeholder
+            placeholder="例如：http://your-registry.com/x-nmos/query/v1.3"
             className="registry-input"
           />
           <button 
