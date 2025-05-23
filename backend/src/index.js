@@ -296,10 +296,11 @@ const axios = require('axios');
 
 // --- IS-04 Discovery --- 
 let currentRegistryUrl = process.env.NMOS_REGISTRY_URL; // NMOS Registry Query API URL (Required via environment variable)
+// Global store for discovered resources, updated by performIS04Discovery and used by WebSocket handlers
 let discoveredResources = {
   nodes: [],
   devices: [],
-  sources: [],
+  sources: [], // Keep sources if it's used elsewhere, though not explicitly in the new hierarchy
   flows: [],
   senders: [],
   receivers: [],
@@ -319,7 +320,8 @@ async function fetchFromRegistry(resourceType, registryUrlToUse) {
     if (error.response) {
       console.error('Error details:', error.response.status, error.response.data);
     }
-    return []; // Return empty array on error
+    // Propagate the error to be handled by the caller
+    throw error;
   }
 }
 
@@ -354,7 +356,7 @@ async function fetchPaginatedResources(startUrl) {
     if (error.response) {
       console.error('Error details:', error.response.status, error.response.data);
     }
-    return []; // Return empty array on error
+    throw error; // Propagate the error
   }
 
   // Step 2: Start fetching from the last page backwards using 'prev' links
@@ -387,7 +389,8 @@ async function fetchPaginatedResources(startUrl) {
       if (error.response) {
         console.error('Error details:', error.response.status, error.response.data);
       }
-      // Stop fetching on error
+      // Stop fetching on error but return what has been collected so far.
+      // Or, rethrow error if partial data is not acceptable: throw error;
       currentPageUrl = null; // Ensure loop terminates on error
     }
   }
@@ -409,82 +412,89 @@ function getLinkByRel(linkHeader, relType) {
       const urlMatch = urlPart.match(/^<(.*)>$/);
       if (urlMatch && urlMatch[1]) {
         console.log(`[getLinkByRel] Found ${relType} link: ${urlMatch[1]}`);
-        // Ensure the returned URL is absolute if necessary, or handle relative URLs
-        // For now, assuming the registry provides absolute URLs in the Link header
         return urlMatch[1];
       }
     }
   }
   console.log(`[getLinkByRel] No rel="${relType}" link found.`);
-  return null; // Explicitly return null if no link with the specified rel is found
+  return null;
 }
 
 // Function to perform IS-04 discovery
+// Fetches all necessary resources and updates the global discoveredResources.
+// Returns the fetched resources for direct use by the caller if needed.
 async function performIS04Discovery(registryUrl) {
   if (!registryUrl) {
-    console.error('错误：未设置 NMOS_REGISTRY_URL 环境变量。无法执行 IS-04 Discovery。');
+    const errorMsg = '错误：未设置 NMOS_REGISTRY_URL。无法执行 IS-04 Discovery。';
+    console.error(errorMsg);
     // Notify frontend about the error
     wss.clients.forEach(client => {
       if (client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify({
-          type: 'nmos_connection_status',
-          status: 'error',
-          message: '错误：未设置 NMOS_REGISTRY_URL 环境变量。无法执行 IS-04 Discovery。'
-        }));
+        client.send(JSON.stringify({ type: 'nmos_connection_status', status: 'error', message: errorMsg }));
       }
     });
-    return;
+    // Throw an error to be caught by the calling API endpoint
+    throw new Error(errorMsg);
   }
 
   console.log(`Performing IS-04 discovery from: ${registryUrl}`);
-  const queryApiUrl = registryUrl.endsWith('/') ? registryUrl : `${registryUrl}/`;
-  const nodesUrl = `${queryApiUrl}nodes`; // Added for nodes
-  const sendersUrl = `${queryApiUrl}senders`;
-  const receiversUrl = `${queryApiUrl}receivers`;
+  // NMOS Query API base URL
+  const queryApiBaseUrl = registryUrl.endsWith('/') ? `${registryUrl}x-nmos/query/v1.3/` : `${registryUrl}/x-nmos/query/v1.3/`;
+
+  const resourcesToFetch = [
+    { name: 'nodes', path: 'nodes' },
+    { name: 'devices', path: 'devices' },
+    { name: 'senders', path: 'senders' },
+    { name: 'receivers', path: 'receivers' },
+    { name: 'flows', path: 'flows' }
+  ];
+
+  const fetchedResources = {
+    nodes: [],
+    devices: [],
+    senders: [],
+    receivers: [],
+    flows: []
+  };
 
   try {
-    // Fetch all Nodes with pagination
-    const nodes = await fetchPaginatedResources(nodesUrl);
-    discoveredResources.nodes = nodes;
+    for (const resourceInfo of resourcesToFetch) {
+      const fullUrl = `${queryApiBaseUrl}${resourceInfo.path}`;
+      console.log(`Fetching ${resourceInfo.name} from ${fullUrl}`);
+      fetchedResources[resourceInfo.name] = await fetchPaginatedResources(fullUrl);
+      console.log(`Successfully fetched ${fetchedResources[resourceInfo.name].length} ${resourceInfo.name}.`);
+    }
 
-    // Fetch all Senders with pagination
-    const senders = await fetchPaginatedResources(sendersUrl);
-    discoveredResources.senders = senders;
+    // Update global discoveredResources for WebSocket updates and other parts of the app
+    discoveredResources.nodes = fetchedResources.nodes;
+    discoveredResources.devices = fetchedResources.devices;
+    discoveredResources.senders = fetchedResources.senders;
+    discoveredResources.receivers = fetchedResources.receivers;
+    discoveredResources.flows = fetchedResources.flows;
+    // Keep discoveredResources.sources if it's managed elsewhere or by different logic
+    // For now, ensure it's at least an empty array if not fetched here.
+    if (!discoveredResources.sources) discoveredResources.sources = [];
 
-    // Fetch all Receivers with pagination
-    const receivers = await fetchPaginatedResources(receiversUrl);
-    discoveredResources.receivers = receivers;
 
-    console.log(`Discovered ${discoveredResources.nodes.length} nodes, ${discoveredResources.senders.length} senders, and ${discoveredResources.receivers.length} receivers.`);
+    console.log(`Discovered ${discoveredResources.nodes.length} nodes, ${discoveredResources.devices.length} devices, ${discoveredResources.senders.length} senders, ${discoveredResources.receivers.length} receivers, and ${discoveredResources.flows.length} flows.`);
 
-    // Attempt to subscribe to IS-04 Query API WebSocket
-    subscribeToRegistryUpdates(registryUrl);
+    // Attempt to subscribe to IS-04 Query API WebSocket for real-time updates
+    // This should use the main registry URL, not the query API base path for subscription creation.
+    subscribeToRegistryUpdates(registryUrl); 
+
+    return fetchedResources; // Return the freshly fetched resources
 
   } catch (error) {
     console.error('Error performing IS-04 discovery:', error.message);
-    if (error.response) {
-      console.error('Error details:', error.response.status, error.response.data);
-      // Notify frontend about the error
-      wss.clients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify({
-            type: 'nmos_connection_status',
-            status: 'error',
-            message: `Failed to discover resources from Registry: ${error.response.statusText}`
-          }));
-        }
-      });
-    } else {
-       wss.clients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify({
-            type: 'nmos_connection_status',
-            status: 'error',
-            message: `Failed to discover resources from Registry: ${error.message}`
-          }));
-        }
-      });
-    }
+    // Notify frontend about the error
+    const errorMsg = `Failed to discover resources from Registry: ${error.message}`;
+    wss.clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify({ type: 'nmos_connection_status', status: 'error', message: errorMsg }));
+      }
+    });
+    // Re-throw the error to be caught by the calling API endpoint
+    throw error;
   }
 }
 
@@ -890,38 +900,128 @@ function handleDataGrain(grain, resourceType) { // Added resourceType parameter
 
 // API endpoint for frontend to get discovered resources
 app.post('/api/is04/discover', async (req, res) => {
-  try {
   const { registryUrl } = req.body;
   if (!registryUrl) {
     return res.status(400).json({ message: 'registryUrl is required in the request body.' });
   }
-  // Basic URL validation (can be more sophisticated)
   if (!registryUrl.startsWith('http://') && !registryUrl.startsWith('https://')) {
     return res.status(400).json({ message: 'Invalid registryUrl format. Must start with http:// or https://' });
   }
 
   console.log(`API call to discover resources from: ${registryUrl}`);
-  currentRegistryUrl = registryUrl; // Update current registry URL for subsequent calls if needed
-  await performIS04Discovery(registryUrl);
-  res.json({ message: `IS-04 discovery initiated for ${registryUrl}.`, data: discoveredResources });
+  currentRegistryUrl = registryUrl; // Update current registry URL for subsequent calls
+
+  try {
+    const fetchedResources = await performIS04Discovery(registryUrl);
+
+    // Structure the data hierarchically
+    const flowsMap = new Map(fetchedResources.flows.map(flow => [flow.id, flow]));
+
+    const structuredNodes = fetchedResources.nodes.map(node => {
+      const devicesForNode = fetchedResources.devices
+        .filter(device => device.node_id === node.id)
+        .map(device => {
+          const sendersForDevice = fetchedResources.senders
+            .filter(sender => sender.device_id === device.id)
+            .map(sender => ({
+              ...sender,
+              flow: flowsMap.get(sender.flow_id) || null, // Embed flow details
+            }));
+          const receiversForDevice = fetchedResources.receivers.filter(
+            receiver => receiver.device_id === device.id
+          );
+          return {
+            ...device,
+            senders: sendersForDevice,
+            receivers: receiversForDevice,
+          };
+        });
+      return {
+        ...node,
+        devices: devicesForNode,
+      };
+    });
+
+    res.json({
+      message: 'Resources discovered successfully',
+      data: {
+        nodes: structuredNodes,
+      },
+    });
+
   } catch (error) {
-    console.error('Unhandled error in /api/is04/discover:', error);
-    res.status(500).json({ message: 'An internal server error occurred during discovery.', error: error.message });
+    console.error(`Error in /api/is04/discover endpoint for registry ${registryUrl}:`, error.message);
+    // The error might have already been logged by performIS04Discovery
+    // and a WebSocket message might have been sent.
+    // Ensure a response is sent to the HTTP client.
+    res.status(500).json({
+      message: 'An internal server error occurred during discovery.',
+      error: error.message,
+      details: error.response ? error.response.data : 'No response data',
+    });
   }
 });
 
-// This endpoint now just returns the last discovered resources.
+// This endpoint now just returns the last discovered resources (globally stored).
 // For a fresh fetch or change of registry, use POST /api/is04/discover
 app.get('/api/is04/resources', (req, res) => {
+  // This will return the globally stored `discoveredResources` which is updated by `performIS04Discovery`
   res.json(discoveredResources);
 });
 
-// The refresh endpoint might be redundant now, or could be re-purposed to use currentRegistryUrl
-// For now, let's have it use the globally stored currentRegistryUrl
+// The refresh endpoint re-runs discovery with the currentRegistryUrl and updates global state.
+// It also returns the newly structured data similar to the /discover endpoint.
 app.post('/api/is04/refresh', async (req, res) => {
+  if (!currentRegistryUrl) {
+    return res.status(400).json({ message: 'No registry URL has been set. Please use /api/is04/discover first.' });
+  }
   console.log(`Refreshing IS-04 resources via API call using current registry: ${currentRegistryUrl}`);
-  await performIS04Discovery(currentRegistryUrl); // Re-run discovery with current URL
-  res.json({ message: `IS-04 resources refresh initiated for ${currentRegistryUrl}.`, data: discoveredResources });
+  
+  try {
+    const fetchedResources = await performIS04Discovery(currentRegistryUrl); // Re-run discovery
+
+    // Structure the data hierarchically (same logic as in /discover)
+    const flowsMap = new Map(fetchedResources.flows.map(flow => [flow.id, flow]));
+
+    const structuredNodes = fetchedResources.nodes.map(node => {
+      const devicesForNode = fetchedResources.devices
+        .filter(device => device.node_id === node.id)
+        .map(device => {
+          const sendersForDevice = fetchedResources.senders
+            .filter(sender => sender.device_id === device.id)
+            .map(sender => ({
+              ...sender,
+              flow: flowsMap.get(sender.flow_id) || null,
+            }));
+          const receiversForDevice = fetchedResources.receivers.filter(
+            receiver => receiver.device_id === device.id
+          );
+          return {
+            ...device,
+            senders: sendersForDevice,
+            receivers: receiversForDevice,
+          };
+        });
+      return {
+        ...node,
+        devices: devicesForNode,
+      };
+    });
+
+    res.json({
+      message: `IS-04 resources refresh initiated and completed for ${currentRegistryUrl}.`,
+      data: {
+        nodes: structuredNodes,
+      },
+    });
+  } catch (error) {
+    console.error(`Error in /api/is04/refresh endpoint for registry ${currentRegistryUrl}:`, error.message);
+    res.status(500).json({
+      message: 'An internal server error occurred during refresh.',
+      error: error.message,
+      details: error.response ? error.response.data : 'No response data',
+    });
+  }
 });
 
 // API endpoint to stop connection to NMOS Registry

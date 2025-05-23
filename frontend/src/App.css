@@ -1,463 +1,290 @@
-/* Gorgeous Dark Theme - App Specific Styles */
-
-/* App-wide variables (can override :root from index.css if needed for App scope) */
-:root {
-  /* Re-affirming some, or defining app-specific ones if they differ from base */
-  --app-background: var(--base-background);
-  --app-text-color: var(--base-text);
-  --app-primary-accent: var(--accent-primary);
-  --app-secondary-accent: var(--accent-secondary);
-  --app-card-background: var(--card-background);
-  --app-border-color: var(--border-subtle);
-  --app-input-background: var(--input-background);
-  --app-input-border: var(--border-subtle); /* Can be slightly different for inputs */
-  --app-button-stop-background: #E53E3E; /* Specific red for stop/destructive */
-  --app-button-stop-hover: #C53030;    /* Darker red for hover */
+/* General App Styles */
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  margin: 0;
+  padding: 0;
+  background-color: #f4f7f6;
+  color: #333;
 }
 
 .App-container {
-  max-width: 1300px; 
+  max-width: 1200px;
   margin: 0 auto;
-  padding: 30px 40px; 
-  background-color: var(--app-background);
-  color: var(--app-text-color);
-  min-height: 100vh;
+  padding: 20px;
 }
 
 .App-header {
-  text-align: center;
-  margin-bottom: 40px; 
-  padding-bottom: 25px; 
-  border-bottom: 2px solid var(--app-primary-accent); 
+  background-color: #ffffff;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  margin-bottom: 20px;
 }
 
 .App-header h1 {
-  /* Inherits h1 style from index.css, but can be overridden */
-  font-size: 2.75em; /* Slightly larger for main app title */
-  color: var(--app-text-color); /* Ensure it uses app text color */
+  color: #0056b3;
+  margin: 0 0 15px 0;
+  text-align: center;
 }
 
 .registry-control {
   display: flex;
-  gap: 15px; 
-  margin-bottom: 30px; 
-  align-items: center;
-  flex-wrap: wrap; /* Allow wrapping on smaller screens */
-}
-
-.registry-control label {
-  font-weight: 600; 
-  color: var(--app-secondary-accent);
-  font-size: 1.05em; /* Slightly larger label */
-}
-
-/* Consistent Input Styling */
-.registry-input, 
-.search-input, 
-.filter-select, 
-.receiver-select {
-  flex-grow: 1;
-  padding: 12px 15px; 
-  border: 1px solid var(--app-input-border);
-  border-radius: 8px; 
-  font-size: 1em;
-  background-color: var(--app-input-background);
-  color: var(--app-text-color);
-  transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
-  min-height: 48px; /* Consistent height */
-  box-sizing: border-box;
-}
-
-.registry-input:focus, 
-.search-input:focus, 
-.filter-select:focus, 
-.receiver-select:focus {
-  outline: none;
-  border-color: var(--app-primary-accent);
-  box-shadow: 0 0 0 3px var(--shadow-color-primary); /* Teal glow */
-}
-
-.stop-button {
-  background-color: var(--app-button-stop-background);
-  color: #FFFFFF; /* White text on red */
-  /* Inherits general button padding, font-weight, border-radius from index.css */
-}
-
-.stop-button:hover:not(:disabled) {
-  background-color: var(--app-button-stop-hover);
-  transform: translateY(-2px); /* Consistent lift */
-  box-shadow: 0 4px 8px rgba(229, 62, 62, 0.3); /* Reddish shadow */
-}
-.stop-button:focus-visible {
-   box-shadow: 0 0 0 3px var(--base-background), 0 0 0 5px var(--app-button-stop-background);
-}
-
-
-/* Message Styling */
-.message {
-  padding: 15px 20px; 
-  margin-bottom: 25px;
-  border-radius: 8px;
-  font-weight: 500; 
-  border: 1px solid transparent;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  transition: opacity 0.3s ease, transform 0.3s ease;
-}
-.message .fa-icon { /* If FontAwesome is used within messages */
-  margin-right: 8px;
-}
-
-.message.error {
-  background-color: var(--error-background); 
-  color: var(--error-text); 
-  border-color: var(--app-button-stop-background); /* Use a more vibrant error color for border */
-}
-
-.message.status { /* For success messages */
-  background-color: var(--success-background); 
-  color: var(--success-text); 
-  border-color: var(--accent-primary); /* Teal border for success */
-}
-
-.message.loading { /* General info/loading messages */
-  background-color: var(--card-background); 
-  color: var(--app-secondary-accent); 
-  border-color: var(--app-secondary-accent);
-}
-
-
-.resource-container {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); 
-  gap: 25px; 
-}
-
-.resource-section h2 {
-  /* Inherits h2 from index.css */
-  margin-bottom: 20px;
-  border-bottom: 1px solid var(--app-border-color);
-  padding-bottom: 12px;
-}
-
-.resource-grid {
-  display: grid; /* This might be redundant if device-group is the direct child */
-  gap: 20px; 
-}
-
-/* Card animation */
-@keyframes fadeInCard {
-  from {
-    opacity: 0;
-    transform: translateY(10px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-.resource-card {
-  background-color: var(--app-card-background);
-  border: 1px solid var(--app-border-color);
-  border-radius: 12px; 
-  padding: 20px 24px; /* Adjusted padding */
-  box-shadow: 0 6px 12px -2px var(--shadow-color-cards), 0 4px 8px -4px rgba(0,0,0,0.1);
-  display: flex;
-  flex-direction: column;
-  transition: transform 0.25s ease-out, box-shadow 0.25s ease-out;
-  
-  /* Animation part */
-  animation: fadeInCard 0.4s ease-in-out forwards;
-  opacity: 0; /* Start transparent for animation */
-}
-/* Stagger animation for multiple cards - can be complex, but a slight delay per item helps */
-.device-group .resource-card:nth-child(1) { animation-delay: 0.05s; }
-.device-group .resource-card:nth-child(2) { animation-delay: 0.1s; }
-.device-group .resource-card:nth-child(3) { animation-delay: 0.15s; }
-/* Add more if needed, or use JS for dynamic stagger */
-
-
-.resource-card:hover {
-  transform: translateY(-5px) scale(1.02); 
-  box-shadow: 0 10px 20px -3px var(--shadow-color-cards), 0 6px 12px -4px rgba(0,0,0,0.15);
-}
-
-.resource-card h3 {
-  /* Inherits h3 from index.css */
-  margin-top: 0;
-  margin-bottom: 15px; 
-  font-size: 1.4em; /* Fine-tune card title size */
-  font-weight: 600;
-  display: flex; /* For icon alignment */
-  align-items: center;
-  gap: 8px; /* Space between icon and text */
-}
-.resource-card h3 .fa-icon {
-  color: var(--app-primary-accent); /* Ensure icon uses accent */
-}
-
-
-.resource-details p {
-  margin: 8px 0; 
-  font-size: 0.95em; 
-  line-height: 1.65; /* Improved line height */
-  word-break: break-all;
-  color: var(--app-text-color);
-  font-family: 'Roboto', 'Arial', sans-serif; /* Keep specified font if desired */
-}
-.resource-details p strong { /* For emphasizing parts like "ID:" */
-  color: var(--app-secondary-accent);
-  font-weight: 500;
-}
-
-
-.connection-control {
-  margin-top: 20px; 
-  padding-top: 15px; 
-  border-top: 1px solid var(--app-input-border); 
-}
-.connection-control .receiver-select { /* Ensure select inside card is full width */
-  width: 100%;
-  margin-bottom: 10px; /* Space if there's a button below */
-}
-
-
-.active-route { /* Style for card when it's an active route */
-  border-color: var(--app-primary-accent) !important; 
-  box-shadow: 0 0 12px var(--shadow-color-primary), 0 8px 16px -4px var(--shadow-color-cards);
-}
-.active-route h3 .fa-icon {
-  color: var(--success-text) !important; /* Green icon for active route */
-}
-
-
-.search-filter {
-  display: flex;
-  align-items: center;
-  gap: 15px; 
-  margin-bottom: 30px; 
   flex-wrap: wrap;
-  background-color: var(--app-card-background); 
-  padding: 20px 25px;
-  border-radius: 12px;
-  box-shadow: 0 4px 10px -2px var(--shadow-color-cards);
-}
-
-
-.subscription-status {
-  display: flex;
+  gap: 10px;
   align-items: center;
-  gap: 8px; 
-  margin-top: 12px; 
-}
-
-.status-indicator {
-  width: 14px; 
-  height: 14px; 
-  border-radius: 50%;
-  border: 1px solid rgba(0,0,0,0.3); 
-  transition: background-color 0.3s ease, box-shadow 0.3s ease;
-}
-
-.status-indicator.connected {
-  background-color: #38A169; /* Vibrant green */
-  box-shadow: 0 0 10px #38A169, 0 0 5px #38A169 inset;
-}
-
-.status-indicator.disconnected {
-  background-color: #E53E3E; /* Vibrant red */
-  box-shadow: 0 0 10px #E53E3E, 0 0 5px #E53E3E inset;
-}
-
-.status-indicator.error {
-  background-color: #DD6B20; /* Vibrant orange for error/warning */
-  box-shadow: 0 0 10px #DD6B20, 0 0 5px #DD6B20 inset;
-}
-
-.status-text {
-  font-size: 0.9em;
-  font-weight: 500;
-  color: var(--app-text-color);
-}
-
-
-/* Connection animation */
-.connection-animation {
-  animation: connect 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94); 
-}
-@keyframes connect { /* Subtle scale and fade */
-  0% { opacity: 0.5; transform: scale(0.95); }
-  100% { opacity: 1; transform: scale(1); }
-}
-
-
-/* Notification */
-.notification {
-  position: fixed;
-  top: 25px;
-  right: 25px;
-  background-color: var(--app-secondary-accent); 
-  color: var(--base-background); 
-  padding: 14px 22px;
-  border-radius: 8px;
-  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.35);
-  animation: fadeInOut 3.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-  z-index: 1000;
-  font-weight: 500;
-}
-@keyframes fadeInOut { /* Smooth fade in and out */
-  0% { opacity: 0; transform: translateY(-20px) scale(0.95); }
-  10% { opacity: 1; transform: translateY(0) scale(1); }
-  90% { opacity: 1; transform: translateY(0) scale(1); }
-  100% { opacity: 0; transform: translateY(-20px) scale(0.95); }
-}
-
-
-/* Highlight effect */
-.highlight {
-  animation: highlight 1.2s ease-in-out;
-}
-@keyframes highlight {
-  0%, 100% { background-color: transparent; }
-  50% { background-color: var(--shadow-color-primary); } /* Subtle teal highlight */
-}
-
-
-/* Pagination Controls Styling */
-.pagination-controls {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  margin-top: 30px; 
   margin-bottom: 15px;
 }
 
-.pagination-controls button {
-  /* Uses global button style from index.css for base */
-  background-color: var(--app-input-background); 
-  color: var(--app-text-color); 
-  border: 1px solid var(--app-input-border); 
-  padding: 10px 18px; 
-  margin: 0 6px; 
-  /* border-radius is inherited */
-  /* font-weight is inherited */
-  /* transition is inherited */
+.registry-control label {
+  font-weight: bold;
+  margin-right: 5px;
 }
 
-.pagination-controls button:hover:not(:disabled) {
-  background-color: var(--app-primary-accent); 
-  color: var(--base-background); 
-  border-color: var(--app-primary-accent);
-  transform: translateY(-2px); /* Consistent lift */
+.registry-input {
+  flex-grow: 1;
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 1em;
+  min-width: 250px; /* Ensure input is not too small */
 }
 
-.pagination-controls button.active {
-  background-color: var(--app-primary-accent); 
-  color: var(--base-background); 
-  font-weight: 700; 
-  border-color: var(--app-primary-accent);
-  box-shadow: 0 0 10px var(--shadow-color-primary); 
+.action-button {
+  padding: 10px 15px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1em;
+  transition: background-color 0.3s ease;
+  color: #ffffff;
 }
 
-.pagination-controls button:disabled {
-  background-color: var(--app-border-color); 
-  color: var(--app-secondary-accent);
-  opacity: 0.6; /* More pronounced disabled state */
-  /* transform: none is inherited */
+.discover-button {
+  background-color: #007bff; /* Blue */
+}
+.discover-button:hover {
+  background-color: #0056b3;
+}
+.discover-button:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
 }
 
-
-/* Grouping Styles */
-.device-group {
-  margin-bottom: 25px; 
-  padding: 20px; 
-  border: 1px solid var(--app-border-color); 
-  border-radius: 10px; 
-  background-color: rgba(var(--base-text-rgb, 226, 232, 240), 0.02); /* Subtle background tint for group */
-  transition: background-color 0.2s ease, border-color 0.2s ease;
+.stop-button {
+  background-color: #dc3545; /* Red */
 }
-.device-group:last-child {
-  margin-bottom: 0;
+.stop-button:hover {
+  background-color: #c82333;
 }
-.device-group:hover {
-  border-color: var(--app-secondary-accent);
-}
-
-.group-heading {
-  /* Inherits h4 from index.css */
-  margin-top: 0; /* Adjusted space above the heading */
-  margin-bottom: 20px; 
-  padding-bottom: 12px; 
-  border-bottom: 2px solid var(--app-primary-accent); 
-  display: inline-block; 
-  padding-right: 15px; 
+.stop-button:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
 }
 
 
-/* Responsive Design Adjustments */
-@media (max-width: 992px) { 
-  .resource-container {
-    grid-template-columns: 1fr; /* Single column for tablets */
-  }
+/* Messages and Notifications */
+.message {
+  padding: 10px;
+  margin: 10px 0;
+  border-radius: 4px;
+  text-align: center;
 }
 
+.error {
+  background-color: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+}
+
+.loading {
+  background-color: #e2e3e5;
+  color: #383d41;
+}
+
+.notification {
+  background-color: #d4edda;
+  color: #155724;
+  padding: 10px;
+  margin-top: 10px;
+  border-radius: 4px;
+  border: 1px solid #c3e6cb;
+}
+
+/* Resource Display - General Cards */
+.resource-card {
+  background-color: #fff;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 15px;
+  margin: 10px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  transition: box-shadow 0.3s ease;
+  width: calc(100% - 20px); /* Full width on small screens, adjusts in grid */
+  box-sizing: border-box;
+}
+
+.resource-card:hover {
+  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.resource-card h3 {
+  margin-top: 0;
+  color: #0056b3;
+  font-size: 1.1em;
+  display: flex;
+  align-items: center;
+}
+
+.resource-details p {
+  margin: 5px 0;
+  font-size: 0.9em;
+  word-break: break-all; /* Prevent long IDs from breaking layout */
+}
+
+.connection-control {
+  margin-top: 15px;
+}
+
+.receiver-select {
+  width: 100%;
+  padding: 8px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+  font-size: 0.9em;
+}
+
+.active-route {
+  border-left: 5px solid #28a745; /* Green border for active */
+}
+.active-route-text {
+  color: #28a745;
+  font-weight: bold;
+}
+
+.highlight {
+  animation: highlight-animation 1s ease-out;
+}
+
+@keyframes highlight-animation {
+  0% { background-color: #fff3cd; } /* Light yellow */
+  100% { background-color: #ffffff; }
+}
+
+.error-card {
+  border-left: 5px solid #dc3545; /* Red border for error cards */
+  background-color: #f8d7da;
+}
+
+/* Hierarchical Display Styles */
+.nodes-container {
+  margin-top: 20px;
+}
+
+.node-display {
+  background-color: #e9ecef; /* Light grey background for nodes */
+  border: 1px solid #ced4da;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.node-label {
+  color: #495057;
+  margin-top: 0;
+  border-bottom: 2px solid #adb5bd;
+  padding-bottom: 10px;
+}
+
+.device-display {
+  background-color: #f8f9fa; /* Slightly lighter grey for devices */
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  padding: 15px;
+  margin-top: 15px;
+  margin-left: 20px; /* Indentation for devices */
+}
+
+.device-label {
+  color: #007bff;
+  margin-top: 0;
+  border-bottom: 1px solid #cce5ff;
+  padding-bottom: 8px;
+}
+
+.senders-section, .receivers-section {
+  margin-top: 15px;
+  padding-left: 10px; /* Indent senders/receivers under device */
+}
+
+.senders-section h4, .receivers-section h4 {
+  color: #6c757d;
+  font-size: 1.1em;
+  margin-bottom: 10px;
+}
+
+.resource-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); /* Responsive grid for cards */
+  gap: 15px;
+}
+
+.sender-card, .receiver-card {
+  /* Specific card styles can be added if needed, defaults to .resource-card */
+}
+
+.embedded-flow-details {
+  border-top: 1px dashed #eee;
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+.embedded-flow-details h4 {
+  margin-top: 0;
+  font-size: 0.95em;
+  color: #343a40;
+}
+
+.empty-state-message {
+  font-style: italic;
+  color: #6c757d;
+  padding: 10px;
+  text-align: center;
+}
+
+/* Tooltip styles */
+[data-tooltip-id^="tooltip-"] {
+  background-color: #333 !important; /* Example: ensure high contrast */
+  color: #fff !important;
+  border-radius: 4px !important;
+  padding: 5px 10px !important;
+  font-size: 0.85em !important;
+}
+
+/* Ensure FontAwesome icons are vertically aligned with text */
+.App-header h1 svg,
+.resource-card h3 svg,
+.message svg {
+  margin-right: 8px;
+  vertical-align: middle; /* Helps align icons with text */
+}
+
+/* Responsive adjustments */
 @media (max-width: 768px) {
-  .App-container {
-    padding: 20px; 
-  }
-  .App-header h1 {
-    font-size: 2.25em; /* Adjust title size */
-  }
-  .registry-control, .search-filter {
+  .registry-control {
     flex-direction: column;
-    align-items: stretch; 
+    align-items: stretch;
   }
-  .registry-input, .search-input, .filter-select, .receiver-select,
-  .registry-control button, .search-filter button { /* Full width for controls */
-    width: 100%;
-    margin-bottom: 15px;
-  }
-  .registry-control button:last-child, .search-filter button:last-child {
-    margin-bottom: 0;
-  }
-  
-  button, .stop-button, .pagination-controls button { /* General button sizing for touch */
-    padding: 12px 18px;
-    font-size: 1.05em;
-    min-height: 48px; 
-  }
-  .pagination-controls {
-    flex-wrap: wrap; /* Allow pagination buttons to wrap */
-    gap: 8px;
-  }
-}
 
-@media (max-width: 480px) {
-  .App-container {
-    padding: 15px;
+  .registry-input, .action-button {
+    width: 100%;
+    box-sizing: border-box; /* Ensure padding and border don't cause overflow */
   }
-  .App-header h1 {
-    font-size: 1.8em;
+
+  .device-display {
+    margin-left: 10px; /* Reduce indentation on smaller screens */
   }
-  .resource-card {
-    padding: 15px; 
-  }
-  .resource-card h3 {
-    font-size: 1.25em;
-  }
-  .resource-details p {
-    font-size: 0.9em;
-  }
-  .search-filter {
-    padding: 15px;
-  }
-  .message {
-    padding: 12px 15px;
-    font-size: 0.95em;
-  }
-  .group-heading {
-    font-size: 1.05em;
+
+  .resource-grid {
+    grid-template-columns: 1fr; /* Single column on very small screens */
   }
 }
