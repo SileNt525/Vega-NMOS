@@ -717,7 +717,7 @@ async function subscribeToRegistryUpdates(registryUrl) {
 
   console.log(`Proceeding to create subscriptions for resource types: ${availableResourceTypes.join(', ')}`);
 
-  for (const type of resourceTypes) { // Corrected variable name here
+  for (const type of availableResourceTypes) { // Corrected variable name from resourceTypes to availableResourceTypes
     const resourcePath = `/${type.endsWith('/') ? type.slice(0, -1) : type}`; // Ensure path like /nodes, /devices
     await attemptSpecificSubscription(registryUrl, resourcePath);
   }
