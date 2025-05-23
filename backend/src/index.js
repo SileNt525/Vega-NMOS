@@ -730,6 +730,9 @@ function handleDataGrain(grain) {
           if (changeData.post && !changeData.pre) { // 新增资源
             changeType = 'added';
             console.log(`Resource added: ${resourceType}/${resourceId}`);
+            if (resourceType === 'receivers' && (!changeData.post.node_id)) {
+              console.warn(`Receiver data from grain (added) is missing node_id. Path: ${resourcePath}, Data: ${JSON.stringify(changeData.post)}`);
+            }
             resourceArray.push(changeData.post);
           } else if (!changeData.post && changeData.pre) { // 移除资源
             changeType = 'removed';
@@ -744,8 +747,18 @@ function handleDataGrain(grain) {
             console.log(`Resource ${changeType}: ${resourceType}/${resourceId}`);
             const index = resourceArray.findIndex(res => res.id === resourceId);
             if (index !== -1) {
+              if (resourceType === 'receivers' && (!changeData.post.node_id)) {
+                console.warn(`Receiver data from grain (modified/synced) is missing node_id. Path: ${resourcePath}, Data: ${JSON.stringify(changeData.post)}`);
+              }
               resourceArray[index] = changeData.post;
             } else {
+              // Resource not found in array, but it's a modification/sync event (implies pre-existing)
+              // This case should ideally not happen if discovery is robust.
+              // However, if it does, treat as an add but log a warning.
+              console.warn(`Resource ${resourceId} not found for ${changeType}, adding instead. This might indicate an issue with initial discovery or prior state.`);
+              if (resourceType === 'receivers' && (!changeData.post.node_id)) {
+                console.warn(`Receiver data from grain (modified/synced, added as new) is missing node_id. Path: ${resourcePath}, Data: ${JSON.stringify(changeData.post)}`);
+              }
               resourceArray.push(changeData.post);
             }
           }
@@ -853,6 +866,30 @@ app.post('/api/nmos/stop-registry', (req, res) => {
 // 存储活动连接的映射表，用于跟踪当前连接状态
 let activeConnections = {}; // 格式: { receiverId: { senderId, timestamp, status } }
 
+// Helper function to determine the IS-05 connection API URL
+function getConnectionApiUrl(node, serviceType, preferredVersion, fallbackVersion) {
+  if (node && node.api && node.api.endpoints && Array.isArray(node.api.endpoints)) {
+    const preferredEndpoint = node.api.endpoints.find(ep =>
+      (ep.type === serviceType && ep.href && ep.href.includes(`/${preferredVersion}`)) ||
+      (ep.href && ep.href.includes(`/x-nmos/connection/${preferredVersion}`)) // More specific check for connection API
+    );
+    if (preferredEndpoint && preferredEndpoint.href) {
+      console.log(`Found ${preferredVersion} endpoint for ${serviceType} at ${node.id}: ${preferredEndpoint.href}`);
+      return preferredEndpoint.href.replace(/\/?$/, ''); // Ensure no trailing slash
+    }
+
+    const fallbackEndpoint = node.api.endpoints.find(ep =>
+      (ep.type === serviceType && ep.href && ep.href.includes(`/${fallbackVersion}`)) ||
+      (ep.href && ep.href.includes(`/x-nmos/connection/${fallbackVersion}`)) // More specific check for connection API
+    );
+    if (fallbackEndpoint && fallbackEndpoint.href) {
+      console.log(`Found ${fallbackVersion} endpoint for ${serviceType} at ${node.id}: ${fallbackEndpoint.href}`);
+      return fallbackEndpoint.href.replace(/\/?$/, ''); // Ensure no trailing slash
+    }
+  }
+  return null; // Indicates no specific endpoint found
+}
+
 async function initializeIS05ConnectionManager() {
   console.log('Initializing IS-05 Connection Manager...');
   
@@ -879,16 +916,28 @@ async function initializeIS05ConnectionManager() {
       return res.status(404).json({ message: `未找到接收端 ${receiverId}` });
     }
 
+    // Validate receiver.node_id
+    if (!receiver.node_id || typeof receiver.node_id !== 'string' || receiver.node_id.trim() === '') {
+        console.error(`Error: Receiver with ID '${receiverId}' is missing a valid 'node_id'. Receiver data: ${JSON.stringify(receiver)}`);
+        return res.status(500).json({ message: `Receiver '${receiverId}' has no associated node_id. Cannot proceed with IS-05 operation.` });
+    }
+
     // 查找与接收端关联的节点以获取其API端点
     const receiverNode = discoveredResources.nodes.find(n => n.id === receiver.node_id);
     if (!receiverNode || !receiverNode.href) {
       return res.status(404).json({ message: `未找到接收端 ${receiverId} 关联的节点或其API端点。节点ID: ${receiver.node_id}` });
     }
 
-    // IS-05 v1.1 uses /x-nmos/connection/v1.1/
-    // Ensure the base URL from node.href is correctly formed (e.g., ends with a slash or not)
-    const nodeApiBaseUrl = receiverNode.href.replace(/\/?$/, ''); // Ensure no trailing slash for concatenation
-    const connectionApiBaseUrl = `${nodeApiBaseUrl}/x-nmos/connection/v1.1`; // Assuming v1.1
+    let connectionApiBaseUrl = getConnectionApiUrl(receiverNode, 'urn:x-nmos:service:connection', 'v1.1', 'v1.0');
+    const nodeApiBaseUrl = receiverNode.href.replace(/\/?$/, ''); // Base for default construction
+
+    if (!connectionApiBaseUrl) {
+      console.log(`No specific IS-05 connection endpoint found for node ${receiverNode.id} in /api/is05/connections. Defaulting to v1.1 path construction.`);
+      connectionApiBaseUrl = `${nodeApiBaseUrl}/x-nmos/connection/v1.1`;
+    } else {
+      // If connectionApiBaseUrl is a full URL from href, we use it directly.
+      // The helper already ensures no trailing slash.
+    }
 
     const stagedUrl = `${connectionApiBaseUrl}/single/receivers/${receiverId}/staged`;
 
@@ -900,6 +949,7 @@ async function initializeIS05ConnectionManager() {
       }
     };
 
+    console.log(`Attempting IS-05 PATCH request to: ${stagedUrl}`); // New log line
     console.log(`向接收端 ${receiverId} 的 staged 端点发送 PATCH 请求: ${stagedUrl}，负载:`, patchPayload);
 
     try {
@@ -940,11 +990,18 @@ async function initializeIS05ConnectionManager() {
         // 获取与接收端关联的节点以获取其API端点
         const receiverNode = discoveredResources.nodes.find(n => n.id === receiver.node_id);
         if (receiverNode && receiverNode.href) {
-          const nodeApiBaseUrl = receiverNode.href.replace(/\/?$/, ''); // Ensure no trailing slash
-          const connectionApiBaseUrl = `${nodeApiBaseUrl}/x-nmos/connection/v1.1`; // Assuming v1.1
+          let connectionApiBaseUrl = getConnectionApiUrl(receiverNode, 'urn:x-nmos:service:connection', 'v1.1', 'v1.0');
+          const nodeApiBaseUrl = receiverNode.href.replace(/\/?$/, '');
+
+          if (!connectionApiBaseUrl) {
+            // console.log(`No specific IS-05 connection endpoint found for node ${receiverNode.id} in GET /api/is05/connections/:receiverId. Defaulting to v1.1 path construction.`);
+            // Using a console.warn or a more specific log for GET might be too verbose, let's keep it lean for GET.
+            connectionApiBaseUrl = `${nodeApiBaseUrl}/x-nmos/connection/v1.1`;
+          }
           
           // 查询接收端的当前活动连接状态
           const activeUrl = `${connectionApiBaseUrl}/single/receivers/${receiverId}/active`;
+          // console.log(`Attempting IS-05 GET request to: ${activeUrl}`); // Logging for GET might be too verbose
             const response = await axios.get(activeUrl, { timeout: 3000 });
             
             if (response.data && response.status === 200) {
@@ -1003,14 +1060,25 @@ async function initializeIS05ConnectionManager() {
       return res.status(404).json({ message: `未找到ID为 ${senderId} 的发送端。` });
     }
 
+    // Validate receiver.node_id
+    if (!receiver.node_id || typeof receiver.node_id !== 'string' || receiver.node_id.trim() === '') {
+        console.error(`Error: Receiver with ID '${receiverId}' is missing a valid 'node_id'. Receiver data: ${JSON.stringify(receiver)}`);
+        return res.status(500).json({ message: `Receiver '${receiverId}' has no associated node_id. Cannot proceed with IS-05 operation.` });
+    }
+
     // 查找与接收端关联的节点以获取其API端点
     const receiverNode = discoveredResources.nodes.find(n => n.id === receiver.node_id);
     if (!receiverNode || !receiverNode.href) {
         console.error(`未找到接收端 ${receiverId} 关联的节点或其API端点。节点ID: ${receiver.node_id}`);
         return res.status(500).json({ message: `未找到接收端 ${receiverId} 关联的节点或其API端点。` });
     }
-    const receiverNodeApiBaseUrl = receiverNode.href.replace(/\/?$/, '');
-    const receiverConnectionApiBaseUrl = `${receiverNodeApiBaseUrl}/x-nmos/connection/v1.1`;
+    
+    let receiverConnectionApiBaseUrl = getConnectionApiUrl(receiverNode, 'urn:x-nmos:service:connection', 'v1.1', 'v1.0');
+    const receiverNodeApiBase = receiverNode.href.replace(/\/?$/, '');
+    if (!receiverConnectionApiBaseUrl) {
+      console.log(`No specific IS-05 connection endpoint found for receiver node ${receiverNode.id} in /api/is05/connect. Defaulting to v1.1 path construction.`);
+      receiverConnectionApiBaseUrl = `${receiverNodeApiBase}/x-nmos/connection/v1.1`;
+    }
 
     const targetUrl = `${receiverConnectionApiBaseUrl}/single/receivers/${receiverId}/staged`;
     
@@ -1023,14 +1091,19 @@ async function initializeIS05ConnectionManager() {
         console.error(`未找到发送端 ${senderId} 关联的节点或其API端点。节点ID: ${sender.node_id}`);
         return res.status(500).json({ message: `未找到发送端 ${senderId} 关联的节点或其API端点。` });
     }
-    const senderNodeApiBaseUrl = senderNode.href.replace(/\/?$/, '');
-    const senderConnectionApiBaseUrl = `${senderNodeApiBaseUrl}/x-nmos/connection/v1.1`;
+
+    let senderConnectionApiBaseUrl = getConnectionApiUrl(senderNode, 'urn:x-nmos:service:connection', 'v1.1', 'v1.0');
+    const senderNodeApiBase = senderNode.href.replace(/\/?$/, '');
+    if (!senderConnectionApiBaseUrl) {
+      console.log(`No specific IS-05 connection endpoint found for sender node ${senderNode.id} in /api/is05/connect (for transportfile). Defaulting to v1.1 path construction.`);
+      senderConnectionApiBaseUrl = `${senderNodeApiBase}/x-nmos/connection/v1.1`;
+    }
 
     // 尝试从发送端获取transportfile
     const senderTransportFileUrl = `${senderConnectionApiBaseUrl}/single/senders/${senderId}/transportfile`;
     let transportFile = null;
     try {
-        console.log(`尝试从发送端 ${senderId} 获取transportfile: ${senderTransportFileUrl}`);
+        console.log(`Attempting to GET transportfile from: ${senderTransportFileUrl}`); // Log for transportfile GET
         const tfResponse = await axios.get(senderTransportFileUrl, { timeout: 3000 });
         if (tfResponse.data && tfResponse.status === 200) {
             transportFile = {
@@ -1055,6 +1128,7 @@ async function initializeIS05ConnectionManager() {
       ...(transportFile && { transport_file: transportFile })
     };
 
+    console.log(`Attempting IS-05 PATCH request to: ${targetUrl}`); // New log line
     console.log(`发送IS-05 PATCH请求到 ${targetUrl}，负载:`, JSON.stringify(payload));
     try {
       // 发送PATCH请求到接收端的staged端点
@@ -1138,15 +1212,26 @@ async function initializeIS05ConnectionManager() {
       return res.status(404).json({ message: `未找到ID为 ${receiverId} 的接收端。` });
     }
 
+    // Validate receiver.node_id
+    if (!receiver.node_id || typeof receiver.node_id !== 'string' || receiver.node_id.trim() === '') {
+        console.error(`Error: Receiver with ID '${receiverId}' is missing a valid 'node_id'. Receiver data: ${JSON.stringify(receiver)}`);
+        return res.status(500).json({ message: `Receiver '${receiverId}' has no associated node_id. Cannot proceed with IS-05 operation.` });
+    }
+
     // 查找与接收端关联的节点以获取其API端点
     const receiverNode = discoveredResources.nodes.find(n => n.id === receiver.node_id);
     if (!receiverNode || !receiverNode.href) {
         console.error(`未找到接收端 ${receiverId} 关联的节点或其API端点。节点ID: ${receiver.node_id}`);
         return res.status(500).json({ message: `Control endpoint for receiver's node ${receiver.node_id} not found.` });
     }
-    const receiverNodeApiBaseUrl = receiverNode.href.replace(/\/?$/, '');
-    const receiverConnectionApiBaseUrl = `${receiverNodeApiBaseUrl}/x-nmos/connection/v1.1`;
 
+    let receiverConnectionApiBaseUrl = getConnectionApiUrl(receiverNode, 'urn:x-nmos:service:connection', 'v1.1', 'v1.0');
+    const receiverNodeApiBase = receiverNode.href.replace(/\/?$/, '');
+    if (!receiverConnectionApiBaseUrl) {
+      console.log(`No specific IS-05 connection endpoint found for receiver node ${receiverNode.id} in /api/is05/disconnect. Defaulting to v1.1 path construction.`);
+      receiverConnectionApiBaseUrl = `${receiverNodeApiBase}/x-nmos/connection/v1.1`;
+    }
+    
     const targetUrl = `${receiverConnectionApiBaseUrl}/single/receivers/${receiverId}/staged`;
 
     // IS-05 disconnect is achieved by setting sender_id to null and master_enable to false
@@ -1155,6 +1240,7 @@ async function initializeIS05ConnectionManager() {
       master_enable: false, 
     };
 
+    console.log(`Attempting IS-05 PATCH request to: ${targetUrl}`); // New log line
     console.log(`Sending IS-05 PATCH to ${targetUrl} with payload:`, JSON.stringify(payload));
 
     try {
