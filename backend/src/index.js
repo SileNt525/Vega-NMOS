@@ -286,9 +286,19 @@ server.listen(PORT, async () => {
   await registerControllerToRegistry();
 
   console.log('Before performing IS-04 Discovery...'); // Added log
-  // Perform initial IS-04 discovery
-  await performIS04Discovery(currentRegistryUrl);
-  console.log('After performing IS-04 Discovery.'); // Added log
+  // Perform initial IS-04 discovery only if NMOS_REGISTRY_URL is set
+  if (currentRegistryUrl && currentRegistryUrl.trim() !== '') {
+    try {
+      await performIS04Discovery(currentRegistryUrl);
+      console.log('After performing IS-04 Discovery.'); // Added log
+    } catch (error) {
+      // Error is already logged by performIS04Discovery, and ws message sent.
+      // Log additional context for startup failure.
+      console.warn(`Initial IS-04 discovery failed on startup: ${error.message}`);
+    }
+  } else {
+    console.warn('NMOS_REGISTRY_URL is not set. Backend will start without initial resource discovery. Please provide the registry URL via the UI.');
+  }
 });
 
 // Move axios import to top of file to fix ReferenceError
