@@ -1,0 +1,71 @@
+.event-rules-container {
+  background: #2a2a2a;
+  padding: 20px;
+  border-radius: 8px;
+  margin-top: 20px;
+  color: #e0e0e0;
+}
+
+.add-rule-form {
+  background: #333;
+  padding: 15px;
+  border-radius: 6px;
+  margin-bottom: 20px;
+}
+
+.rule-section {
+  margin: 10px 0;
+  padding: 10px;
+  border: 1px solid #444;
+  border-radius: 4px;
+}
+
+.rule-section h4 {
+  margin-top: 0;
+  color: #aaa;
+}
+
+.add-btn {
+  background: #4caf50;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-top: 10px;
+}
+
+.rules-list {
+  display: grid;
+  gap: 10px;
+}
+
+.rule-card {
+  background: #3a3a3a;
+  padding: 10px;
+  border-radius: 4px;
+  border-left: 4px solid #2196f3;
+}
+
+.rule-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 5px;
+}
+
+.delete-btn {
+  background: transparent;
+  color: #ff5252;
+  border: none;
+  cursor: pointer;
+}
+
+select, input {
+  background: #222;
+  color: white;
+  border: 1px solid #555;
+  padding: 5px;
+  border-radius: 3px;
+  margin-right: 10px;
+}

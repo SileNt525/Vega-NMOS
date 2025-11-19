@@ -1,0 +1,52 @@
+.channel-mapping-container {
+    background: #2a2a2a;
+    padding: 20px;
+    border-radius: 8px;
+    margin-top: 20px;
+    color: #e0e0e0;
+}
+
+.selection-bar {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    background: #333;
+    padding: 10px;
+    border-radius: 4px;
+}
+
+.mapping-matrix {
+    background: #333;
+    padding: 15px;
+    border-radius: 6px;
+}
+
+.matrix-header {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    font-weight: bold;
+    border-bottom: 1px solid #555;
+    padding-bottom: 5px;
+    margin-bottom: 10px;
+}
+
+.matrix-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: center;
+    margin-bottom: 5px;
+    padding: 5px;
+    background: #3a3a3a;
+    border-radius: 3px;
+}
+
+.save-btn {
+    background: #2196f3;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-top: 15px;
+    width: 100%;
+}

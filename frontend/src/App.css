@@ -1,10 +1,12 @@
 /* General App Styles */
 body {
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  /* Modern font */
   margin: 0;
   padding: 0;
-  background-color: #f4f7f6;
-  color: #333;
+  background-color: #1e1e1e;
+  /* Dark mode background */
+  color: #e0e0e0;
 }
 
 .App-container {
@@ -14,17 +16,21 @@ body {
 }
 
 .App-header {
-  background-color: #ffffff;
+  background-color: #2a2a2a;
   padding: 20px;
   border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
   margin-bottom: 20px;
+  border-bottom: 1px solid #333;
 }
 
 .App-header h1 {
-  color: #0056b3;
+  color: #61dafb;
+  /* React Blue-ish */
   margin: 0 0 15px 0;
   text-align: center;
+  font-weight: 300;
+  letter-spacing: 1px;
 }
 
 .registry-control {
@@ -33,258 +39,168 @@ body {
   gap: 10px;
   align-items: center;
   margin-bottom: 15px;
+  background: #333;
+  padding: 15px;
+  border-radius: 6px;
 }
 
 .registry-control label {
   font-weight: bold;
   margin-right: 5px;
+  color: #ccc;
 }
 
 .registry-input {
   flex-grow: 1;
   padding: 10px;
-  border: 1px solid #ccc;
+  border: 1px solid #555;
+  background-color: #222;
+  color: white;
   border-radius: 4px;
   font-size: 1em;
-  min-width: 250px; /* Ensure input is not too small */
+  min-width: 250px;
 }
 
 .action-button {
-  padding: 10px 15px;
+  padding: 10px 20px;
   border: none;
   border-radius: 4px;
   cursor: pointer;
   font-size: 1em;
-  transition: background-color 0.3s ease;
+  transition: all 0.2s ease;
   color: #ffffff;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .discover-button {
-  background-color: #007bff; /* Blue */
+  background: linear-gradient(135deg, #007bff, #0056b3);
 }
+
 .discover-button:hover {
-  background-color: #0056b3;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
+
 .discover-button:disabled {
-  background-color: #cccccc;
+  background: #555;
   cursor: not-allowed;
+  transform: none;
 }
 
 .stop-button {
-  background-color: #dc3545; /* Red */
+  background: linear-gradient(135deg, #dc3545, #a71d2a);
 }
+
 .stop-button:hover {
-  background-color: #c82333;
-}
-.stop-button:disabled {
-  background-color: #cccccc;
-  cursor: not-allowed;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+  border-bottom: 2px solid #333;
+  padding-bottom: 10px;
+}
 
-/* Messages and Notifications */
+.tabs button {
+  background: transparent;
+  border: none;
+  color: #888;
+  padding: 10px 20px;
+  font-size: 1.1em;
+  cursor: pointer;
+  transition: color 0.2s;
+  border-bottom: 3px solid transparent;
+}
+
+.tabs button:hover {
+  color: #ccc;
+}
+
+.tabs button.active {
+  color: #61dafb;
+  border-bottom-color: #61dafb;
+  font-weight: bold;
+}
+
+/* Messages */
 .message {
-  padding: 10px;
+  padding: 15px;
   margin: 10px 0;
-  border-radius: 4px;
+  border-radius: 6px;
   text-align: center;
 }
 
 .error {
-  background-color: #f8d7da;
-  color: #721c24;
-  border: 1px solid #f5c6cb;
+  background-color: #3e181b;
+  color: #ff6b6b;
+  border: 1px solid #fa5252;
 }
 
 .loading {
-  background-color: #e2e3e5;
-  color: #383d41;
+  background-color: #2a2a2a;
+  color: #aaa;
+  border: 1px solid #444;
 }
 
 .notification {
-  background-color: #d4edda;
-  color: #155724;
-  padding: 10px;
-  margin-top: 10px;
-  border-radius: 4px;
-  border: 1px solid #c3e6cb;
-}
-
-/* Resource Display - General Cards */
-.resource-card {
-  background-color: #fff;
-  border: 1px solid #ddd;
-  border-radius: 6px;
+  background-color: #1b3b25;
+  color: #51cf66;
   padding: 15px;
-  margin: 10px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-  transition: box-shadow 0.3s ease;
-  width: calc(100% - 20px); /* Full width on small screens, adjusts in grid */
-  box-sizing: border-box;
+  margin-top: 10px;
+  border-radius: 6px;
+  border: 1px solid #2b8a3e;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
-.resource-card:hover {
-  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+/* Resource Card Override for Dark Mode */
+.resource-card {
+  background-color: #2a2a2a;
+  border: 1px solid #444;
+  color: #e0e0e0;
 }
 
 .resource-card h3 {
-  margin-top: 0;
-  color: #0056b3;
-  font-size: 1.1em;
-  display: flex;
-  align-items: center;
-}
-
-.resource-details p {
-  margin: 5px 0;
-  font-size: 0.9em;
-  word-break: break-all; /* Prevent long IDs from breaking layout */
-}
-
-.connection-control {
-  margin-top: 15px;
-}
-
-.receiver-select {
-  width: 100%;
-  padding: 8px;
-  border-radius: 4px;
-  border: 1px solid #ccc;
-  font-size: 0.9em;
-}
-
-.active-route {
-  border-left: 5px solid #28a745; /* Green border for active */
-}
-.active-route-text {
-  color: #28a745;
-  font-weight: bold;
-}
-
-.highlight {
-  animation: highlight-animation 1s ease-out;
-}
-
-@keyframes highlight-animation {
-  0% { background-color: #fff3cd; } /* Light yellow */
-  100% { background-color: #ffffff; }
-}
-
-.error-card {
-  border-left: 5px solid #dc3545; /* Red border for error cards */
-  background-color: #f8d7da;
-}
-
-/* Hierarchical Display Styles */
-.nodes-container {
-  margin-top: 20px;
+  color: #61dafb;
 }
 
 .node-display {
-  background-color: #e9ecef; /* Light grey background for nodes */
-  border: 1px solid #ced4da;
-  border-radius: 8px;
-  padding: 20px;
-  margin-bottom: 20px;
+  background-color: #252525;
+  border: 1px solid #333;
 }
 
 .node-label {
-  color: #495057;
-  margin-top: 0;
-  border-bottom: 2px solid #adb5bd;
-  padding-bottom: 10px;
+  color: #e0e0e0;
+  border-bottom-color: #444;
 }
 
 .device-display {
-  background-color: #f8f9fa; /* Slightly lighter grey for devices */
-  border: 1px solid #dee2e6;
-  border-radius: 6px;
-  padding: 15px;
-  margin-top: 15px;
-  margin-left: 20px; /* Indentation for devices */
+  background-color: #2a2a2a;
+  border-color: #444;
 }
 
 .device-label {
-  color: #007bff;
-  margin-top: 0;
-  border-bottom: 1px solid #cce5ff;
-  padding-bottom: 8px;
+  color: #90caf9;
+  border-bottom-color: #333;
 }
 
-.senders-section, .receivers-section {
-  margin-top: 15px;
-  padding-left: 10px; /* Indent senders/receivers under device */
-}
-
-.senders-section h4, .receivers-section h4 {
-  color: #6c757d;
-  font-size: 1.1em;
-  margin-bottom: 10px;
-}
-
-.resource-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); /* Responsive grid for cards */
-  gap: 15px;
-}
-
-.sender-card, .receiver-card {
-  /* Specific card styles can be added if needed, defaults to .resource-card */
-}
-
-.embedded-flow-details {
-  border-top: 1px dashed #eee;
-  margin-top: 10px;
-  padding-top: 10px;
-}
-
-.embedded-flow-details h4 {
-  margin-top: 0;
-  font-size: 0.95em;
-  color: #343a40;
+.senders-section h4,
+.receivers-section h4 {
+  color: #aaa;
 }
 
 .empty-state-message {
-  font-style: italic;
-  color: #6c757d;
-  padding: 10px;
-  text-align: center;
+  color: #777;
 }
 
-/* Tooltip styles */
-[data-tooltip-id^="tooltip-"] {
-  background-color: #333 !important; /* Example: ensure high contrast */
-  color: #fff !important;
-  border-radius: 4px !important;
-  padding: 5px 10px !important;
-  font-size: 0.85em !important;
-}
-
-/* Ensure FontAwesome icons are vertically aligned with text */
-.App-header h1 svg,
-.resource-card h3 svg,
-.message svg {
-  margin-right: 8px;
-  vertical-align: middle; /* Helps align icons with text */
-}
-
-/* Responsive adjustments */
-@media (max-width: 768px) {
-  .registry-control {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .registry-input, .action-button {
-    width: 100%;
-    box-sizing: border-box; /* Ensure padding and border don't cause overflow */
-  }
-
-  .device-display {
-    margin-left: 10px; /* Reduce indentation on smaller screens */
-  }
-
-  .resource-grid {
-    grid-template-columns: 1fr; /* Single column on very small screens */
-  }
+select,
+input {
+  background-color: #333;
+  color: white;
+  border: 1px solid #555;
 }

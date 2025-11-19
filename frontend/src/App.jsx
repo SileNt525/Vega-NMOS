@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'; // Removed useMemo
 import './App.css';
 import NmosSubscription from './components/NmosSubscription.jsx';
-import NodeDisplay from './components/NodeDisplay.jsx'; // Import NodeDisplay
+import NodeDisplay from './components/NodeDisplay.jsx';
+import EventRules from './components/EventRules.jsx';
+import ChannelMapping from './components/ChannelMapping.jsx';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faExclamationTriangle } from '@fortawesome/free-solid-svg-icons';
 // Removed unused icons: faSatelliteDish, faBroadcastTower, faLink from App.jsx as they are now in cards
@@ -16,6 +18,7 @@ function App() {
   const [activeRoutes, setActiveRoutes] = useState({});
   const [notification, setNotification] = useState('');
   const [highlight, setHighlight] = useState('');
+  const [activeTab, setActiveTab] = useState('routing'); // routing, rules, mapping
 
   const fetchResources = useCallback(async (isRefresh = false, customUrl = null) => {
     setIsLoading(true);
@@ -45,7 +48,7 @@ function App() {
         throw new Error(errorData.message || `HTTP错误！状态：${response.status}`);
       }
       const data = await response.json();
-      
+
       if (data.data && data.data.nodes) {
         setNodes(data.data.nodes);
 
@@ -70,7 +73,7 @@ function App() {
         // States already reset if structure is not as expected
         console.warn("API response did not contain expected nodes structure:", data);
       }
-      
+
       alert(data.message || '资源获取成功！');
       setError(null);
     } catch (e) {
@@ -170,16 +173,16 @@ function App() {
             placeholder="例如：http://your-registry.com/x-nmos/query/v1.3"
             className="registry-input"
           />
-          <button 
-            onClick={handleDiscover} 
-            disabled={isLoading || !registryUrl} 
+          <button
+            onClick={handleDiscover}
+            disabled={isLoading || !registryUrl}
             className="action-button discover-button"
           >
             {isLoading ? '正在发现...' : '发现/刷新资源'}
           </button>
-          <button 
-            onClick={handleStopConnection} 
-            disabled={isLoading} 
+          <button
+            onClick={handleStopConnection}
+            disabled={isLoading}
             className="action-button stop-button"
           >
             停止连接注册表
@@ -187,28 +190,55 @@ function App() {
         </div>
         <NmosSubscription onUpdate={handleSubscriptionUpdate} />
       </header>
-      
+
       {error && <p className="message error"><FontAwesomeIcon icon={faExclamationTriangle} /> {error}</p>}
       {notification && <div className="notification">{notification}</div>}
       {isLoading && !error && <p className="message loading">正在加载资源...</p>}
 
-      <div className="nodes-container">
-        {nodes.length === 0 && !isLoading && !error && (
-          <p className="empty-state-message">
-            {registryUrl ? '未发现节点。请确保注册表URL正确且可访问。' : '请输入注册表URL并点击发现资源。'}
-          </p>
-        )}
-        {nodes.map(node => (
-          <NodeDisplay
-            key={node.id}
-            node={node}
-            allReceivers={receivers} // Pass flat list of all receivers for SenderCard dropdown
-            handleConnect={handleConnect}
-            activeRoutes={activeRoutes}
-            highlight={highlight}
-          />
-        ))}
+      <div className="tabs">
+        <button
+          className={activeTab === 'routing' ? 'active' : ''}
+          onClick={() => setActiveTab('routing')}
+        >
+          Routing
+        </button>
+        <button
+          className={activeTab === 'rules' ? 'active' : ''}
+          onClick={() => setActiveTab('rules')}
+        >
+          Event Rules (IS-07)
+        </button>
+        <button
+          className={activeTab === 'mapping' ? 'active' : ''}
+          onClick={() => setActiveTab('mapping')}
+        >
+          Channel Mapping (IS-08)
+        </button>
       </div>
+
+      {activeTab === 'routing' && (
+        <div className="nodes-container">
+          {nodes.length === 0 && !isLoading && !error && (
+            <p className="empty-state-message">
+              {registryUrl ? '未发现节点。请确保注册表URL正确且可访问。' : '请输入注册表URL并点击发现资源。'}
+            </p>
+          )}
+          {nodes.map(node => (
+            <NodeDisplay
+              key={node.id}
+              node={node}
+              allReceivers={receivers}
+              handleConnect={handleConnect}
+              activeRoutes={activeRoutes}
+              highlight={highlight}
+            />
+          ))}
+        </div>
+      )}
+
+      {activeTab === 'rules' && <EventRules senders={senders} receivers={receivers} />}
+
+      {activeTab === 'mapping' && <ChannelMapping nodes={nodes} />}
     </div>
   );
 }
